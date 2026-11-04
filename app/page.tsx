@@ -7,6 +7,7 @@ import { languageNames, languages, type Language, type Manual, type ManualConten
 type Tab = 'home' | 'cases' | 'manuals';
 const manualFields = ['title','steps','cautions'] as const;
 const glyphs = {home:'⌂', cases:'◫', manuals:'▤'};
+const focusSearchResults = (heading: HTMLHeadingElement | null) => heading?.focus();
 const siteName = (id: string) => id === 'sakura' ? 'Sakura Building' : id;
 type SpeechInput = {
   lang: string;
@@ -215,16 +216,9 @@ export default function BridgeWork() {
         {error && <p className="alert" role="alert">{errorText}</p>}
         {busy && <p className="busy" role="status">{t('searching')}</p>}
         {tab === 'home' && !manager && <>
-          <form className="panel flow ask" onSubmit={event => {event.preventDefault(); setManualId(''); run(async () => setResults(await send({action:'search',text:query,language})));}}>
-            <div className="section-head"><span className="tile">?</span><div><div className="eyebrow">{t('help')}</div><h2>{t('hero')}</h2></div></div>
-            <textarea aria-label={t('help')} placeholder={t('placeholder')} rows={3} maxLength={3000} required value={query} disabled={busy}
-              onChange={event => {setQuery(event.target.value);setResults(undefined);setManualId('');}}/>
-            <div className="actions"><button disabled={busy || listening || !query.trim()}>⌕ &nbsp; {t('search')}</button>
-              {voiceSupported && <button className="secondary" type="button" disabled={busy || listening} onClick={dictate}>{t(listening ? 'listening' : 'voice')}</button>}
-              {results && <button className="secondary" type="button" disabled={busy} onClick={() => ask()}>{t('send')} →</button>}</div>
-          </form>
-          {results && <section className="panel flow"><h2>{t('similar')}</h2>
-            {!results.matches.length ? <p>{t('noMatch')}</p> : <><p className="notice">{t('confirmSite')}</p>{!results.ai && <p className="muted">{t('fallback')}</p>}</>}
+          {results && results.matches.length > 0 && <section className="panel flow" aria-labelledby="related-knowledge">
+            <h2 id="related-knowledge" tabIndex={-1} ref={focusSearchResults}>{t('similar')}</h2>
+            <p className="notice">{t('confirmSite')}</p>{!results.ai && <p className="muted">{t('fallback')}</p>}
             {results.matches.map(match => <article className="result flow" key={match.kind + match.id}>
               <div className="eyebrow">{siteName(match.siteId)} · {t(match.kind === 'manual' ? 'manuals' : 'cases')}</div>
               <h3>{match.title}</h3>
@@ -242,6 +236,18 @@ export default function BridgeWork() {
               </div></>}
             </article>)}
           </section>}
+          <form className="panel flow ask" onSubmit={event => {
+            event.preventDefault(); setManualId(''); setResults(undefined);
+            run(async () => setResults(await send({action:'search',text:query,language})));
+          }}>
+            <div className="section-head"><span className="tile">?</span><div><div className="eyebrow">{t('help')}</div><h2>{t('hero')}</h2></div></div>
+            <textarea aria-label={t('help')} placeholder={t('placeholder')} rows={3} maxLength={3000} required value={query} disabled={busy}
+              onChange={event => {setQuery(event.target.value);setResults(undefined);setManualId('');}}/>
+            {results?.matches.length === 0 && <p role="status">{t('noMatch')}</p>}
+            <div className="actions"><button disabled={busy || listening || !query.trim()}>⌕ &nbsp; {t('search')}</button>
+              {voiceSupported && <button className="secondary" type="button" disabled={busy || listening} onClick={dictate}>{t(listening ? 'listening' : 'voice')}</button>}
+              {results && <button className="secondary" type="button" disabled={busy} onClick={() => ask()}>{t('send')} →</button>}</div>
+          </form>
         </>}
         {tab === 'home' && manager && <>
           <div className="stats">{(['new','active','resolved'] as const).map(status => <button className="panel stat" key={status} onClick={() => {setStatusFilter(status); changeTab('cases');}}>
