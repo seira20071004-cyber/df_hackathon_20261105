@@ -78,8 +78,10 @@ nav { display:grid; gap:5px; }
 .bubble small,.bubble summary { color:var(--muted); }
 .check { display:flex; align-items:flex-start; gap:9px; font-size:.9rem; }
 .manual { display:grid; gap:12px; }
-.steps { display:grid; gap:8px; list-style:none; padding:0; }
+.steps { display:grid; gap:20px; list-style:none; padding:0; }
 .steps li { display:flex; align-items:center; gap:12px; background:#eef4ff; border-radius:13px; padding:12px; }
+.steps li:not(:last-child) { position:relative; }
+.steps li:not(:last-child)::after { content:'↓'; position:absolute; top:100%; left:25px; color:var(--blue); line-height:20px; }
 .steps span { display:grid; place-items:center; flex:none; width:38px; height:38px; border-radius:10px; color:white; background:var(--blue); font-weight:800; }
 .manual-details { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
 .manual-details section { background:var(--surface); border-radius:12px; padding:12px; }

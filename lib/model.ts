@@ -68,6 +68,15 @@ export interface Match {
   answer: string;
   resolution: string;
   manualIds: string[];
+  version?: string;
+}
+export interface ManualView {
+  id: string;
+  organizationId: string;
+  siteId: string;
+  employeeId: string;
+  manualId: string;
+  version: string;
 }
 export interface Workspace {
   profile: Profile;

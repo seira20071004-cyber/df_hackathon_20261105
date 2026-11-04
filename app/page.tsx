@@ -4,10 +4,9 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import { copy } from '../lib/copy';
 import { languageNames, languages, type Language, type Manual, type ManualContent, type Match, type Question, type Workspace } from '../lib/model';
 
-type Tab = 'home' | 'cases' | 'manuals' | 'analyze';
-type Analysis = {counts: [string, number][]; total: number; ai: {observations: string[]; themes: string[]} | null};
+type Tab = 'home' | 'cases' | 'manuals';
 const manualFields = ['title','task','purpose','tools','steps','cautions','mistakes','checks'] as const;
-const glyphs = {home:'⌂', cases:'◫', manuals:'▤', analyze:'✧'};
+const glyphs = {home:'⌂', cases:'◫', manuals:'▤'};
 const siteName = (id: string) => id === 'sakura' ? 'Sakura Building' : id;
 type SpeechInput = {
   lang: string;
@@ -59,7 +58,7 @@ function Editor({manual, busy, save}: {manual: Manual; busy: boolean; save: (con
         <textarea rows={3} required={key === 'steps'} maxLength={6000} value={fields[key]} onChange={event => {setConfirmed(false); setFields({...fields,[key]:event.target.value});}} />}
     </label>)}
     <label className="check"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} /> 作業条件と手順を確認しました</label>
-    <div className="actions"><button className="secondary" disabled={busy} value="draft">下書き保存</button><button disabled={busy || !confirmed} value="publish">承認して公開</button></div>
+    <div className="actions"><button className="secondary" disabled={busy} value="draft">未確認として保存</button><button disabled={busy || !confirmed} value="publish">確認済にする</button></div>
   </form>;
 }
 
@@ -76,9 +75,6 @@ export default function BridgeWork() {
   const [results,setResults] = useState<{matches: Match[]; ai: boolean}>();
   const [message,setMessage] = useState('');
   const [resolution,setResolution] = useState('');
-  const [theme,setTheme] = useState('');
-  const [sources,setSources] = useState<string[]>([]);
-  const [analysis,setAnalysis] = useState<Analysis>();
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState('');
   const [reuseConfirmed,setReuseConfirmed] = useState(false);
@@ -164,7 +160,7 @@ export default function BridgeWork() {
       setQuery(''); setResults(undefined); openCase(created.id);
     });
   }
-  const errorText = error === 'voice-error' ? t('voiceError') : error === 'review-steps' ? '確認が必要な手順を編集してから公開してください。'
+  const errorText = error === 'conversation-updated' ? t('conversationUpdated') : error === 'voice-error' ? t('voiceError') : error === 'review-steps' ? '確認が必要な手順を編集してから公開してください。'
     : error === 'stale-manual' ? '別の操作で更新されました。画面を更新してから編集してください。'
     : error === 'login-required' ? 'セッションの有効期限が切れました。ログアウトして再ログインしてください。' : t('error');
 
@@ -194,7 +190,7 @@ export default function BridgeWork() {
   return <div className="app-shell">
     <aside className="sidebar">
       <Brand/><div className="eyebrow nav-label">{t('workspace')}</div>
-      <nav aria-label={t('workspace')}>{(['home','cases','manuals',...(manager ? ['analyze'] : [])] as Tab[]).map(item =>
+      <nav aria-label={t('workspace')}>{(['home','cases','manuals'] as Tab[]).map(item =>
         <button key={item} className={'nav-button ' + (tab === item ? 'current' : '')} aria-current={tab === item ? 'page' : undefined} onClick={() => changeTab(item)}>
           <span aria-hidden="true">{glyphs[item]}</span>{manager && item === 'home' ? 'ダッシュボード' : t(item)}
         </button>)}</nav>
@@ -206,7 +202,7 @@ export default function BridgeWork() {
         <div className="top-actions">
           {data.demo && <Badge variant="demo">{t('demo')}</Badge>}
           <select aria-label={t('site')} value={site} disabled={busy || listening} onChange={event => {
-            setSite(event.target.value); setSelected(''); setManualId(''); setResults(undefined); setAnalysis(undefined); setSources([]);
+            setSite(event.target.value); setSelected(''); setManualId(''); setResults(undefined);
           }}>{data.profile.siteIds.map(id => <option key={id} value={id}>{siteName(id)}</option>)}</select>
           <select aria-label="Language" value={language} disabled={busy || listening} onChange={event => {
             const next = event.target.value as Language;
@@ -215,7 +211,7 @@ export default function BridgeWork() {
           }}>{languages.map(code => <option key={code} value={code}>{languageNames[code]}</option>)}</select>
           <button className="link" disabled={busy || listening} onClick={() => {
             sessionStorage.removeItem('bridge-token'); setToken(''); setData(undefined); setLanguage('ja'); setQuery(''); setResults(undefined); setSelected('');
-            setManualId(''); setTheme(''); setSources([]); setAnalysis(undefined); setMessage(''); setResolution(''); setReuseConfirmed(false); setError(''); setTab('home'); setStatusFilter('all');
+            setManualId(''); setMessage(''); setResolution(''); setReuseConfirmed(false); setError(''); setTab('home'); setStatusFilter('all');
           }}>{t('signout')}</button>
         </div>
       </header>
@@ -223,13 +219,10 @@ export default function BridgeWork() {
         {error && <p className="alert" role="alert">{errorText}</p>}
         {busy && <p className="busy" role="status">{t('searching')}</p>}
         {tab === 'home' && !manager && <>
-          <section className="hero"><div className="hero-decoration" aria-hidden="true">↗</div><div className="eyebrow">✦ &nbsp; {siteName(site)}</div>
-            <h1>{t('welcome')}, {data.profile.name.split(' ')[0]}!</h1><p>{t('intro')}</p>
-          </section>
-          <form className="panel flow ask" onSubmit={event => {event.preventDefault(); run(async () => setResults(await send({action:'search',text:query,language})));}}>
+          <form className="panel flow ask" onSubmit={event => {event.preventDefault(); setManualId(''); run(async () => setResults(await send({action:'search',text:query,language})));}}>
             <div className="section-head"><span className="tile">?</span><div><div className="eyebrow">{t('help')}</div><h2>{t('hero')}</h2></div></div>
             <textarea aria-label={t('help')} placeholder={t('placeholder')} rows={3} maxLength={3000} required value={query} disabled={busy}
-              onChange={event => {setQuery(event.target.value);setResults(undefined);}}/>
+              onChange={event => {setQuery(event.target.value);setResults(undefined);setManualId('');}}/>
             <div className="actions"><button disabled={busy || listening || !query.trim()}>⌕ &nbsp; {t('search')}</button>
               {voiceSupported && <button className="secondary" type="button" disabled={busy || listening} onClick={dictate}>{t(listening ? 'listening' : 'voice')}</button>}
               {results && <button className="secondary" type="button" disabled={busy} onClick={() => ask()}>{t('send')} →</button>}</div>
@@ -238,26 +231,30 @@ export default function BridgeWork() {
             {!results.matches.length ? <p>{t('noMatch')}</p> : <><p className="notice">{t('confirmSite')}</p>{!results.ai && <p className="muted">{t('fallback')}</p>}</>}
             {results.matches.map(match => <article className="result flow" key={match.kind + match.id}>
               <div className="eyebrow">{siteName(match.siteId)} · {t(match.kind === 'manual' ? 'manuals' : 'cases')}</div>
-              <h3>{match.title}</h3><p>{match.answer}</p>{match.resolution && match.resolution !== match.answer && <p>{match.resolution}</p>}
-              <div className="actions">{match.manualIds.map(id => <button key={id} className="secondary" onClick={() => openManual(id)}>{t('manuals')} ↗</button>)}
-                <button className="secondary" disabled={busy} onClick={() => ask(match)}>{t('selfResolve')}</button></div>
+              <h3>{match.title}</h3>
+              {manual?.id === match.id ? <>
+                <ManualView manual={manual} language={language}/>
+                <button className="secondary" disabled={busy} onClick={() => ask(match)}>{t('selfResolve')}</button>
+              </> : <><p>{t('manualFits')}</p><div className="actions">
+                <button className="secondary" disabled={busy} onClick={() => run(async () => {
+                  await send({action:'viewManual',id:match.id,version:match.version});
+                  await refresh(token);
+                  setManualId(match.id);
+                })}>{t('showManual')}</button>
+                <button className="link" disabled={busy} onClick={() => setResults({...results,
+                  matches: results.matches.filter(candidate => candidate.id !== match.id)})}>{t('skipManual')}</button>
+              </div></>}
             </article>)}
           </section>}
         </>}
         {tab === 'home' && manager && <>
-          <section className="hero"><div className="hero-decoration" aria-hidden="true">↗</div><div className="eyebrow">✦ &nbsp; {siteName(site)}</div>
-            <h1>現場の相談を、次の知恵へ。</h1><p>相談の対応状況と、現場で共有できる知識を確認できます。</p>
-          </section>
           <div className="stats">{(['new','active','resolved'] as const).map(status => <button className="panel stat" key={status} onClick={() => {setStatusFilter(status); changeTab('cases');}}>
             <Badge variant={status}>{t(status)}</Badge><strong>{questions.filter(row => row.status === status).length}</strong></button>)}</div>
-          <section className="panel flow"><div className="split"><h2>よくある質問カテゴリ</h2><button className="link" onClick={() => changeTab('analyze')}>AI 分析 →</button></div>
-            <div className="actions">{[...new Set(questions.map(row => row.category))].map(category => <Badge key={category}>{category} · {questions.filter(row => row.category === category).length}</Badge>)}</div>
-          </section>
           <section className="panel flow"><div className="split"><h2>{t('manuals')}</h2><button className="link" onClick={() => changeTab('manuals')}>{t('all')} →</button></div>
             <div className="actions">{manuals.slice(0,5).map(row => <button className="secondary" key={row.id} onClick={() => openManual(row.id)}>{row.content.title}</button>)}</div>
           </section>
         </>}
-        {tab === 'home' && <section className="panel flow"><div className="split"><h2>{t('recent')}</h2><button className="link" onClick={() => {setStatusFilter('all');changeTab('cases');}}>{t('all')} →</button></div>
+        {tab === 'home' && manager && <section className="panel flow"><div className="split"><h2>{t('recent')}</h2><button className="link" onClick={() => {setStatusFilter('all');changeTab('cases');}}>{t('all')} →</button></div>
           {caseList(questions.slice(0,4))}
         </section>}
         {tab === 'cases' && <>
@@ -293,39 +290,26 @@ export default function BridgeWork() {
                 <div className="actions"><button className="secondary" disabled={busy || (!question.approvedForReuse && !reuseConfirmed)} onClick={() => run(async () => {
                   await send({action:'reuse',id:question.id,approved:!question.approvedForReuse});setReuseConfirmed(false);await refresh(token);
                 })}>{question.approvedForReuse ? '再利用承認を取り消す' : 'ナレッジ再利用を承認'}</button>
-                <button className="secondary" onClick={() => {setSources([question.id]);setTheme(question.category);setManualId('');changeTab('manuals');}}>マニュアル作成へ →</button></div>
+</div>
               </div>}
             </>}
           </section>}
         </>}
         {tab === 'manuals' && <>
-          <section className="panel flow"><h2>{t('manuals')}</h2>
-            {manuals.length ? <div className="rows">{manuals.map(row => <button className="row" key={row.id} onClick={() => openManual(row.id)}>
-              <span className="tile">▤</span><span className="row-text"><strong>{(row.translations[language] ?? row.content).title}</strong><small>{siteName(row.siteId)}</small></span>
-              <Badge variant={row.status === 'published' ? 'resolved' : 'active'}>{t(row.status)}</Badge><span>›</span></button>)}</div> : <p className="empty">{t('empty')}</p>}
-          </section>
+          {(manager ? ['draft','published'] as const : ['published'] as const).map(status => {
+            const rows = manuals.filter(row => row.status === status);
+            return <section className="panel flow" key={status}>
+              <h2>{manager ? status === 'draft' ? '未確認' : '確認済' : t('manuals')}</h2>
+              {rows.length ? <div className="rows">{rows.map(row => <button className="row" key={row.id} onClick={() => openManual(row.id)}>
+                <span className="tile">▤</span><span className="row-text"><strong>{(row.translations[language] ?? row.content).title}</strong><small>{siteName(row.siteId)}</small></span>
+                <span>›</span></button>)}</div> : <p className="empty">{t('empty')}</p>}
+            </section>;
+          })}
           {manual && <ManualView manual={manual} language={language}/>}
           {manual && manager && <Editor key={manual.id + manual.updatedAt} manual={manual} busy={busy} save={(content,publish) => run(async () => {
             await send({action:'saveManual',id:manual.id,version:manual.updatedAt,content,publish});await refresh(token);
           })}/>}
-          {manager && <form className="panel flow" onSubmit={event => {event.preventDefault();run(async () => {
-            const draft = await send<Manual>({action:'draft',theme,sourceIds:sources});await refresh(token);setManualId(draft.id);
-          });}}><h2>図解マニュアルの下書き</h2><label>テーマ<input value={theme} onChange={event => setTheme(event.target.value)} maxLength={500} required/></label>
-            <fieldset><legend>参照する解決履歴（最大15件）</legend>{questions.filter(row => row.status === 'resolved').map(row =>
-              <label className="check" key={row.id}><input type="checkbox" checked={sources.includes(row.id)} disabled={sources.length >= 15 && !sources.includes(row.id)}
-                onChange={event => setSources(event.target.checked ? [...sources,row.id] : sources.filter(id => id !== row.id))}/>{row.japaneseText || row.originalText}</label>)}</fieldset>
-            <div className="actions"><button disabled={busy}>✧ &nbsp; 下書きを生成</button></div>
-          </form>}
         </>}
-        {tab === 'analyze' && manager && <section className="panel flow">
-          <div className="split"><h2>解決履歴の AI 分析</h2><button disabled={busy} onClick={() => run(async () => setAnalysis(await send({action:'analyze'})))}>✧ &nbsp; 分析する</button></div>
-          <p>現場の解決履歴を集計し、新人向けマニュアルにできるテーマを探します。</p>
-          {analysis && <><h3>解決済み {analysis.total} 件</h3><div className="actions">{analysis.counts.map(([name,count]) => <Badge key={name}>{name} · {count}</Badge>)}</div>
-            {analysis.ai ? <><h3>つまずきの傾向</h3><ul>{analysis.ai.observations.map((value,index) => <li key={index}>{value}</li>)}</ul>
-              <h3>マニュアル候補</h3><div className="actions">{analysis.ai.themes.map((value,index) => <button key={index} className="secondary" onClick={() => {
-                setTheme(value);setManualId('');changeTab('manuals');
-              }}>{value} →</button>)}</div></> : <p className="notice">現在は実データの集計を表示しています。AI の提案を取得できませんでした。</p>}</>}
-        </section>}
         <footer>Bridge Work <span>·</span> {siteName(site)}</footer>
       </main>
     </div>

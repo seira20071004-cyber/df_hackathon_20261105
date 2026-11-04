@@ -1,8 +1,8 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { generate, manualContent, relevance, summarize, translate } from './ai';
 import { isScoped, languageNames, languages, mayReadManual, mayReadQuestion, mayReuse, topic, type Language, type Manual, type Match, type Profile, type Question } from './model';
-import { isDemo, list, mutate, setLanguage, slug } from './storage';
+import { isDemo, list, mutate, resolveWithManual, setLanguage, slug } from './storage';
 
 const text = z.string().trim().min(1).max(3000);
 const location = {siteId: slug};
@@ -15,8 +15,7 @@ export const actionSchema = z.discriminatedUnion('action', [
   z.object({action: z.literal('resolve'), ...record, text}),
   z.object({action: z.literal('reuse'), ...record, approved: z.boolean()}),
   z.object({action: z.literal('selfResolve'), ...location, text, language: z.enum(languages), matchId: slug, kind: z.enum(['question','manual']), id: z.uuid()}),
-  z.object({action: z.literal('analyze'), ...location}),
-  z.object({action: z.literal('draft'), ...location, theme: text, sourceIds: z.array(slug).max(15)}),
+  z.object({action: z.literal('viewManual'), ...record, version: z.string().max(40)}),
   z.object({action: z.literal('saveManual'), ...record, content: manualContent, publish: z.boolean(), version: z.string().max(40)})
 ]);
 export type Action = z.infer<typeof actionSchema>;
@@ -33,7 +32,16 @@ async function loadSite(profile: Profile, siteId: string) {
   return {questions: newest(questions.filter(row => isScoped(profile, row))), manuals: newest(manuals.filter(row => isScoped(profile, row)))};
 }
 export async function workspace(profile: Profile) {
-  const sites = await Promise.all(profile.siteIds.map(siteId => loadSite(profile, siteId)));
+  const sites = await Promise.all(profile.siteIds.map(async siteId => {
+    const site = await loadSite(profile, siteId);
+    if (profile.role === 'manager') return site;
+    const viewed = (await list(profile, siteId, 'manualViews')).filter(view => isScoped(profile, view) && view.employeeId === profile.id);
+    const legacyReferences = site.questions.filter(question => question.employeeId === profile.id)
+      .flatMap(question => question.references).filter(reference => reference.kind === 'manual' && !reference.version);
+    return {...site, manuals: site.manuals.filter(manual => mayReadManual(profile, manual) &&
+      (viewed.some(view => view.manualId === manual.id && view.version === manual.updatedAt) ||
+        legacyReferences.some(reference => reference.id === manual.id)))};
+  }));
   return {profile, demo: isDemo(), ai: Boolean(process.env.GEMINI_API_KEY),
     questions: newest(sites.flatMap(site => site.questions.filter(row => mayReadQuestion(profile,row)))),
     manuals: newest(sites.flatMap(site => site.manuals.filter(row => mayReadManual(profile,row))))};
@@ -49,30 +57,32 @@ function candidates(questions: Question[], manuals: Manual[]): Match[] {
       manualIds: published.filter(manual => manual.sourceQuestionIds.includes(question.id)).map(manual => manual.id)
     })),
     ...published.map(manual => ({id: manual.id, kind: 'manual' as const, siteId: manual.siteId, title: manual.content.title,
-      answer: manual.content.purpose, resolution: '', manualIds: [manual.id]}))
+      answer: manual.content.purpose, resolution: '', manualIds: [manual.id], version: manual.updatedAt}))
   ];
 }
 function matchKey(match: Match) {return match.kind + '/' + match.id;}
-async function localize(match: Match, manuals: Manual[], language: Language): Promise<Match> {
-  if (language === 'ja') return match;
-  const manual = match.kind === 'manual' ? manuals.find(row => row.id === match.id)?.translations[language] : undefined;
-  if (manual) return {...match, title: manual.title, answer: manual.purpose};
-  const [title, answer, resolution] = await Promise.all([match.title, match.answer, match.resolution].map(async value => value && (await translate(value,'ja',language,isDemo()) || value)));
-  return {...match, title, answer, resolution};
-}
 async function makeQuestion(profile: Profile, siteId: string, id: string, originalText: string, originalLanguage: Language): Promise<Question> {
   const japaneseText = await translate(originalText, originalLanguage, 'ja', isDemo());
   return {id, organizationId: profile.organizationId, siteId, employeeId: profile.id, originalText, originalLanguage, japaneseText,
     category: topic(japaneseText || originalText), summary: await summarize(japaneseText), status: 'new',
     approvedForReuse: false, createdAt: date(), resolvedAt: null, resolution: '', messages: [], references: []};
 }
-function facts(question: Question) {
-  return {
-    question: question.japaneseText || question.originalText,
-    managerReplies: question.messages.filter(message => message.role === 'manager').map(message => message.originalText),
-    resolution: question.resolution,
-    reference: question.references.map(row => row.answer)
+async function createDraft(question: Question, resolution: string): Promise<Manual> {
+  const unknown = '管理者による確認が必要';
+  const title = (question.japaneseText || question.originalText).slice(0, 500);
+  const replies = question.messages.filter(message => message.role === 'manager').map(message => message.originalText);
+  const content = await generate(manualContent,
+    '相談の会話と解決内容をもとに日本語で図解用の作業マニュアルを作成してください。steps は図解の各カードに表示する短い手順です。会話にない方法・安全ルールや個人情報は含めず、不明なら「管理者による確認が必要」としてください。',
+    {question: title, conversation: question.messages.map(message => ({
+      role: message.role, text: message.role === 'employee' ? message.translatedText || message.originalText : message.originalText
+    })), resolution}) ?? {
+    title, task: question.category === 'その他' ? title : question.category, purpose: unknown, tools: [],
+    steps: [...new Set(replies.filter(reply => reply.length <= 500))].slice(-11).concat([unknown]),
+    cautions: [], mistakes: [], checks: [resolution.slice(0, 500)]
   };
+  const createdAt = date();
+  return {id: randomUUID(), organizationId: question.organizationId, siteId: question.siteId, content, translations: {},
+    languages: ['ja'], sourceQuestionIds: [question.id], status: 'draft', approvedBy: null, imageUrls: [], createdAt, updatedAt: createdAt};
 }
 export async function execute(profile: Profile, input: Action) {
   if (input.action === 'language') {
@@ -88,6 +98,10 @@ export async function execute(profile: Profile, input: Action) {
       const {questions, manuals} = await loadSite(profile, siteId);
       const match = candidates(questions, manuals).find(row => row.kind === input.kind && row.id === input.matchId);
       if (!match) throw new ApiError(404, 'not-found');
+      if (match.kind === 'manual' && !(await list(profile, siteId, 'manualViews')).some(view =>
+        isScoped(profile, view) && view.employeeId === profile.id && view.manualId === match.id && view.version === match.version)) {
+        throw new ApiError(404, 'not-found');
+      }
       question.status = 'resolved';
       question.resolvedAt = date();
       question.resolution = match.resolution || match.answer;
@@ -99,8 +113,18 @@ export async function execute(profile: Profile, input: Action) {
     });
   }
   const {questions, manuals} = await loadSite(profile, siteId);
+  if (input.action === 'viewManual') {
+    assertRole(profile, 'employee');
+    const manual = manuals.find(row => row.id === input.id && mayReadManual(profile, row));
+    if (!manual || manual.updatedAt !== input.version) throw new ApiError(404, 'not-found');
+    const id = createHash('sha256').update(JSON.stringify([profile.id, manual.id])).digest('hex');
+    await mutate(profile, siteId, 'manualViews', id, () => ({
+      id, employeeId: profile.id, organizationId: profile.organizationId, siteId, manualId: manual.id, version: manual.updatedAt
+    }));
+    return manual;
+  }
   if (input.action === 'search') {
-    const matches = candidates(questions, manuals);
+    const matches = candidates([], manuals);
     const ranked = matches.map(match => ({match, score: relevance(input.text, match.title + ' ' + match.answer)}))
       .sort((a,b) => b.score - a.score);
     const pool = ranked.slice(0, 60).map(({match}) => match);
@@ -108,13 +132,28 @@ export async function execute(profile: Profile, input: Action) {
       '質問と意味や作業内容が近い候補を最大3件選んでください。無関係なら空配列。候補のキーをそのまま返してください。',
       {question: input.text, candidates: pool.map(match => ({id: matchKey(match), title: match.title, answer: match.answer}))}) : null;
     const result = ids ? [...new Set(ids.ids)].flatMap(id => pool.filter(match => matchKey(match) === id)) : ranked.filter(row => row.score >= 1).slice(0,3).map(row => row.match);
-    return {matches: await Promise.all(result.map(match => localize(match, manuals, input.language))), ai: Boolean(ids)};
+    return {matches: await Promise.all(result.map(async match => {
+      const manual = manuals.find(row => row.id === match.id);
+      const title = manual?.translations[input.language]?.title || (input.language === 'ja' ? match.title :
+        await translate(match.title, 'ja', input.language, isDemo()) || match.title);
+      return {...match, title, answer: ''};
+    })), ai: Boolean(ids)};
   }
   if (input.action === 'reply' || input.action === 'resolve' || input.action === 'reuse') {
     const previous = questions.find(row => row.id === input.id && mayReadQuestion(profile,row));
     if (!previous) throw new ApiError(404, 'not-found');
     if (input.action === 'reuse') assertRole(profile, 'manager');
-    if (input.action === 'resolve') assertRole(profile, 'employee');
+    if (input.action === 'resolve') {
+      assertRole(profile, 'employee');
+      if (previous.status === 'resolved') return previous;
+      const manual = await createDraft(previous, input.text);
+      return resolveWithManual(profile, siteId, manual, question => {
+        if (!question || !mayReadQuestion(profile, question)) throw new ApiError(404, 'not-found');
+        if (question.status === 'resolved') return question;
+        if (question.messages.length !== previous.messages.length) throw new ApiError(409, 'conversation-updated');
+        return {...question, status: 'resolved', resolvedAt: date(), resolution: input.text};
+      });
+    }
     const source = profile.role === 'manager' ? 'ja' : previous.originalLanguage;
     const target = profile.role === 'manager' ? previous.originalLanguage : 'ja';
     const translatedText = input.action === 'reply' ? await translate(input.text, source, target, isDemo()) : '';
@@ -123,10 +162,6 @@ export async function execute(profile: Profile, input: Action) {
       if (input.action === 'reuse') {
         if (question.status !== 'resolved') throw new ApiError(409, 'open-question');
         return {...question, approvedForReuse: input.approved};
-      }
-      if (input.action === 'resolve') {
-        if (question.status === 'resolved') return question;
-        return {...question, status: 'resolved', resolvedAt: date(), resolution: input.text};
       }
       if (question.messages.some(message => message.id === input.messageId)) return question;
       if (question.status === 'resolved' || question.messages.length >= 50) throw new ApiError(409, 'closed-or-limit');
@@ -138,33 +173,6 @@ export async function execute(profile: Profile, input: Action) {
     });
   }
   assertRole(profile, 'manager');
-  const resolved = questions.filter(question => question.status === 'resolved');
-  if (input.action === 'analyze') {
-    const counts = Object.entries(resolved.reduce<Record<string, number>>((result, question) => {
-      result[question.category] = (result[question.category] || 0) + 1;
-      return result;
-    }, {})).sort((a,b) => b[1] - a[1]);
-    const ai = resolved.length ? await generate(z.object({observations: z.array(z.string().max(500)).max(5), themes: z.array(z.string().max(250)).max(5)}),
-      '解決事例から新人のつまずきとマニュアル化のテーマを日本語で提案してください。件数や存在しない事例を生成しないでください。',
-      {counts, examples: resolved.slice(0, 30).map(facts)}) : null;
-    return {counts, total: resolved.length, ai};
-  }
-  if (input.action === 'draft') {
-    const sources = [...new Set(input.sourceIds)].map(id => resolved.find(row => row.id === id));
-    if (sources.some(row => !row)) throw new ApiError(404, 'not-found');
-    const sourceFacts = sources.flatMap(row => row ? [facts(row)] : []);
-    const unknown = '管理者による確認が必要';
-    const content = await generate(manualContent,
-      '解決履歴を根拠に日本語の図解用マニュアル下書きを作成してください。手順・道具・洗剤・安全ルールなど、根拠にない内容は一切追加せず「管理者による確認が必要」としてください。',
-      {theme: input.theme, sources: sourceFacts}) ?? {
-      title: input.theme.slice(0, 500), task: input.theme.slice(0, 500), purpose: unknown, tools: [],
-      steps: [...new Set(sourceFacts.flatMap(row => row.managerReplies).filter(reply => reply.length <= 500))].slice(0, 12).concat([unknown]).slice(-12),
-      cautions: [], mistakes: [], checks: []
-    };
-    const manual: Manual = {id: randomUUID(), organizationId: profile.organizationId, siteId, content, translations: {}, languages: ['ja'],
-      sourceQuestionIds: [...new Set(input.sourceIds)], status: 'draft', approvedBy: null, imageUrls: [], createdAt: date(), updatedAt: date()};
-    return mutate(profile, siteId, 'manuals', manual.id, () => manual);
-  }
   const previous = manuals.find(manual => manual.id === input.id);
   if (!previous) throw new ApiError(404, 'not-found');
   if (input.publish && input.content.steps.includes('管理者による確認が必要')) throw new ApiError(400, 'review-steps');

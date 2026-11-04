@@ -6,7 +6,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore, type CollectionReference } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import { demoProfiles, seedDemo } from './demo';
-import { languages, type Profile, type Question, type Manual } from './model';
+import { languages, type Profile, type Question, type Manual, type ManualView } from './model';
 
 export const isDemo = () => process.env.BRIDGE_DEMO === 'true';
 export const slug = z.string().regex(/^[a-zA-Z0-9_-]{1,120}$/);
@@ -26,7 +26,7 @@ export async function authenticate(token: string): Promise<Profile | null> {
 export async function setLanguage(profile: Profile, preferredLanguage: Profile['preferredLanguage']) {
   if (!isDemo()) await getFirestore(app()).collection('users').doc(profile.id).update({preferredLanguage});
 }
-type Records = {questions: Question; manuals: Manual};
+type Records = {questions: Question; manuals: Manual; manualViews: ManualView};
 type Table = keyof Records;
 type DemoState = {[K in Table]: Records[K][]};
 const folder = process.env.BRIDGE_DEMO_DATA_DIR || '.bridge-work';
@@ -34,10 +34,10 @@ const demoFile = join(folder, 'data.json');
 let pending = Promise.resolve();
 async function readDemo(): Promise<DemoState> {
   try {
-    return JSON.parse(await readFile(demoFile, 'utf8'));
+    return {manualViews: [], ...JSON.parse(await readFile(demoFile, 'utf8'))};
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    return seedDemo();
+    return {...seedDemo(), manualViews: []};
   }
 }
 function collection<T extends Table>(profile: Profile, siteId: string, table: T) {
@@ -61,13 +61,19 @@ export async function mutate<T extends Table>(profile: Profile, siteId: string, 
       return next;
     });
   }
-  const operation = pending.then(async () => {
-    const data = await readDemo();
+  return mutateDemo(data => {
     const records = data[table];
     const next = update(records.find(record => record.id === id));
     const index = records.findIndex(record => record.id === id);
     if (index === -1) records.push(next);
     else records[index] = next;
+    return next;
+  });
+}
+function mutateDemo<T>(update: (data: DemoState) => T) {
+  const operation = pending.then(async () => {
+    const data = await readDemo();
+    const next = update(data);
     await mkdir(folder, {recursive: true});
     const temp = join(folder, randomUUID() + '.tmp');
     await writeFile(temp, JSON.stringify(data), 'utf8');
@@ -76,4 +82,31 @@ export async function mutate<T extends Table>(profile: Profile, siteId: string, 
   });
   pending = operation.then(() => undefined, () => undefined);
   return operation;
+}
+
+export async function resolveWithManual(profile: Profile, siteId: string, manual: Manual, update: (previous: Question | undefined) => Question) {
+  const id = manual.sourceQuestionIds[0];
+  if (!isDemo()) {
+    const questionDoc = collection(profile, siteId, 'questions').doc(id);
+    const manualDoc = collection(profile, siteId, 'manuals').doc(manual.id);
+    return questionDoc.firestore.runTransaction(async tx => {
+      const previous = (await tx.get(questionDoc)).data();
+      const next = update(previous);
+      if (previous !== next) {
+        tx.set(questionDoc, next);
+        tx.create(manualDoc, manual);
+      }
+      return next;
+    });
+  }
+  return mutateDemo(data => {
+    const index = data.questions.findIndex(question => question.id === id);
+    const previous = data.questions[index];
+    const next = update(previous);
+    if (previous !== next) {
+      data.questions[index] = next;
+      data.manuals.push(manual);
+    }
+    return next;
+  });
 }
