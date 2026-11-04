@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { after } from 'next/server';
 import { z } from 'zod';
 import { generate, illustrate, manualContent, relevance, summarize, translate } from './ai';
 import { isScoped, languageNames, languages, mayReadManual, mayReadQuestion, mayReuse, topic, type Language, type Manual, type Match, type Profile, type Question } from './model';
@@ -68,28 +69,38 @@ async function makeQuestion(profile: Profile, siteId: string, id: string, origin
     category: topic(japaneseText || originalText), summary: await summarize(japaneseText), status: 'new',
     approvedForReuse: false, createdAt: date(), resolvedAt: null, resolution: '', messages: [], references: []};
 }
-async function createDraft(question: Question, resolution: string): Promise<Manual> {
-  const unknown = '管理者による確認が必要';
+const needsReview = '管理者による確認が必要';
+function createDraft(question: Question): Manual {
   const title = (question.japaneseText || question.originalText).slice(0, 500);
   const replies = question.messages.filter(message => message.role === 'manager').flatMap(message => message.originalText.split(/\r?\n/))
     .map(reply => reply.trim()).filter(reply => reply.length > 0 && reply.length <= 500);
   const caution = /^(?:[※＊*]\s*|注意[：:]\s*|警告[：:]\s*|caution[:：]\s*|warning[:：]\s*)/iu;
   const fallbackSteps = [...new Set(replies.filter(reply => !caution.test(reply)))].slice(-12);
+  const content = {
+    title, task: title, purpose: title, tools: [],
+    steps: fallbackSteps.length ? fallbackSteps : [needsReview],
+    cautions: [...new Set(replies.filter(reply => caution.test(reply)))].slice(-12),
+    mistakes: [], checks: []
+  };
+  const createdAt = date();
+  return {id: randomUUID(), organizationId: question.organizationId, siteId: question.siteId, content, translations: {},
+    languages: ['ja'], sourceQuestionIds: [question.id], status: 'draft', approvedBy: null, imageUrls: [], createdAt, updatedAt: createdAt};
+}
+async function enrichDraft(profile: Profile, draft: Manual, question: Question) {
+  const title = draft.content.title;
   const extracted = await generate(manualContent.pick({title: true, steps: true, cautions: true}),
     '相談の会話から質問内容(title)、対処法(steps)、注意事項(cautions)だけを日本語で抽出してください。挨拶、重複、推測、個人情報は除き、質問に答えるための確認できた手順だけを整理してください。会話に明記された注意事項だけを記載し、なければ cautions は空配列にしてください。対処法が不明なら steps は「管理者による確認が必要」の1項目にしてください。',
     {question: title, conversation: question.messages.map(message => ({
       role: message.role, text: message.role === 'employee' ? message.translatedText || message.originalText : message.originalText
-    })), resolution});
-  const content = {
-    title: extracted?.title || title, task: title, purpose: title, tools: [],
-    steps: extracted?.steps ?? (fallbackSteps.length ? fallbackSteps : [unknown]),
-    cautions: extracted?.cautions ?? [...new Set(replies.filter(reply => caution.test(reply)))].slice(-12),
-    mistakes: [], checks: []
-  };
-  const imageUrls = content.steps.includes(unknown) ? [] : await illustrate(content.steps);
-  const createdAt = date();
-  return {id: randomUUID(), organizationId: question.organizationId, siteId: question.siteId, content, translations: {},
-    languages: ['ja'], sourceQuestionIds: [question.id], status: 'draft', approvedBy: null, imageUrls, createdAt, updatedAt: createdAt};
+    })), resolution: question.resolution});
+  const content = {...draft.content, ...extracted};
+  const imageUrls = content.steps.includes(needsReview) ? [] : await illustrate(content.steps);
+  if (!extracted && !imageUrls.length) return;
+  await mutate(profile, draft.siteId, 'manuals', draft.id, current => {
+    if (!current) throw new ApiError(404, 'not-found');
+    if (current.status !== 'draft' || current.updatedAt !== draft.updatedAt) return current;
+    return {...current, content, imageUrls, updatedAt: date()};
+  });
 }
 export async function execute(profile: Profile, input: Action) {
   if (input.action === 'language') {
@@ -157,13 +168,17 @@ export async function execute(profile: Profile, input: Action) {
       assertRole(profile, 'employee');
       if (previous.status === 'resolved') return previous;
       const resolution = input.text ?? '';
-      const manual = await createDraft(previous, resolution);
-      return resolveWithManual(profile, siteId, manual, question => {
+      const manual = createDraft(previous);
+      const result = await resolveWithManual(profile, siteId, manual, question => {
         if (!question || !mayReadQuestion(profile, question)) throw new ApiError(404, 'not-found');
         if (question.status === 'resolved') return question;
         if (question.messages.length !== previous.messages.length) throw new ApiError(409, 'conversation-updated');
         return {...question, status: 'resolved', resolvedAt: date(), resolution};
       });
+      if (result.created && process.env.GEMINI_API_KEY) {
+        after(() => enrichDraft(profile, manual, result.question));
+      }
+      return result.question;
     }
     const source = profile.role === 'manager' ? 'ja' : previous.originalLanguage;
     const target = profile.role === 'manager' ? previous.originalLanguage : 'ja';

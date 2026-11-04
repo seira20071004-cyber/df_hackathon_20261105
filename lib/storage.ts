@@ -96,7 +96,7 @@ export async function resolveWithManual(profile: Profile, siteId: string, manual
         tx.set(questionDoc, next);
         tx.create(manualDoc, manual);
       }
-      return next;
+      return {question: next, created: previous !== next};
     });
   }
   return mutateDemo(data => {
@@ -107,6 +107,6 @@ export async function resolveWithManual(profile: Profile, siteId: string, manual
       data.questions[index] = next;
       data.manuals.push(manual);
     }
-    return next;
+    return {question: next, created: previous !== next};
   });
 }

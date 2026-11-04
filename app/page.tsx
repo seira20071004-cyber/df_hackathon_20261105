@@ -275,8 +275,10 @@ export default function BridgeWork() {
                 await send({action:'reply', id:question.id, text:message, messageId:crypto.randomUUID()}); setMessage(''); await refresh(token);
               });}}><input aria-label={t('message')} placeholder={t('message')} value={message} onChange={event => setMessage(event.target.value)} maxLength={3000} required/>
                 <button disabled={busy || !message.trim()}>{t('reply')} →</button></form>
-              {!manager && <div className="actions"><button className="secondary" disabled={busy} onClick={() => run(async () => {
-                await send({action:'resolve', id:question.id}); await refresh(token);
+              {!manager && <div className="actions"><button type="button" className="secondary" disabled={busy} onClick={() => run(async () => {
+                const resolved = await send<Question>({action:'resolve', id:question.id});
+                setData(current => current && {...current, questions: current.questions.map(row =>
+                  row.id === resolved.id && row.siteId === resolved.siteId ? resolved : row)});
               })}>{t('resolve')}</button></div>}
             </> : <>{question.resolution && <p className="notice">{t('resolution')} · {question.resolution}</p>}
               {manager && <div className="flow">
