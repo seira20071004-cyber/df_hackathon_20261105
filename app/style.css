@@ -78,6 +78,7 @@ nav { display:grid; gap:5px; }
 .bubble small,.bubble summary { color:var(--muted); }
 .check { display:flex; align-items:flex-start; gap:9px; font-size:.9rem; }
 .manual { display:grid; gap:12px; }
+.procedure-image { display:block; max-width:min(100%, 520px); height:auto; border-radius:12px; }
 .steps { display:grid; gap:20px; list-style:none; padding:0; }
 .steps li { display:flex; align-items:center; gap:12px; background:#eef4ff; border-radius:13px; padding:12px; }
 .steps li:not(:last-child) { position:relative; }

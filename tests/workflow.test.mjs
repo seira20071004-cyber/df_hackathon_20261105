@@ -61,6 +61,10 @@ test('Vietnamese consultation, safe reuse, and publication survive reload', {tim
   const sample = (await search()).matches.find(match => match.id === 'sample-manual');
   assert.ok(sample);
   assert.equal(sample.answer,'');
+  for (const [text,language] of [['階段で滑ってけがをしたらどうすればいい？','ja'], ['How often do I clean the stairs?','en']]) {
+    const unrelated = await api('linh',{action:'search',text,language});
+    assert.equal(unrelated.matches.length,0);
+  }
   assert.equal((await api('linh')).manuals.length,0);
   await api('linh',{action:'viewManual',id:sample.id,version:sample.version});
   assert.equal((await api('linh')).manuals[0].id,sample.id);
@@ -72,6 +76,7 @@ test('Vietnamese consultation, safe reuse, and publication survive reload', {tim
   await api('linh',input);
   await api('linh',input);
   const manager = await api('sato');
+  assert.equal(manager.questions[0].id,id);
   assert.equal(manager.questions.filter(row => row.id === id).length,1);
   assert.match(manager.questions.find(row => row.id === id).japaneseText,/階段/);
   assert.equal((await api('alex')).questions.some(row => row.id === id),false);
@@ -84,8 +89,8 @@ test('Vietnamese consultation, safe reuse, and publication survive reload', {tim
   assert.match(row.messages[0].translatedText,/cầu thang/);
   assert.equal(row.status,'active');
   await api('linh',{action:'reply',id,text:vi,messageId:randomUUID()});
-  await api('linh',{action:'resolve',id,text:'階段の対象範囲を確認しました。'});
-  await api('linh',{action:'resolve',id,text:'階段の対象範囲を確認しました。'});
+  await api('linh',{action:'resolve',id});
+  await api('linh',{action:'resolve',id});
   await api('linh',{action:'reuse',id,approved:true},403);
   await api('linh',{action:'reply',id,text:vi,messageId:randomUUID()},409);
   row = (await api('sato')).questions.find(row => row.id === id);
@@ -101,6 +106,7 @@ test('Vietnamese consultation, safe reuse, and publication survive reload', {tim
   const [draft] = created;
   assert.equal(draft.status,'draft');
   assert.ok(draft.content.steps.includes(answer));
+  assert.deepEqual(draft.content.cautions,[]);
   assert.equal((await api('alex')).manuals.some(row => row.id === draft.id),false);
   assert.equal((await search('alex')).matches.some(match => match.id === draft.id),false);
   await api('alex',{action:'viewManual',id:draft.id,version:draft.updatedAt},404);

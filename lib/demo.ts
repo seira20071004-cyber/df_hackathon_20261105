@@ -15,7 +15,7 @@ export const examples = [
   ['汚れが落ちない場合はどうすればいいですか？', 'What if a stain will not come off?', 'Tôi phải làm gì nếu không tẩy được vết bẩn?', '作業を中断し、デモ現場の管理者に確認してください。', 'Stop the task and check with the demo site manager.', 'Hãy dừng công việc và hỏi người quản lý tại địa điểm demo.']
 ];
 export function seedDemo() {
-  const date = '2026-11-05T00:00:00.000Z';
+  const date = '2025-11-05T00:00:00.000Z';
   const questions: Question[] = examples.map(([originalText,,, answer], index) => ({
     ...scope, id: 'sample-' + index, employeeId: 'alex', originalText, originalLanguage: 'ja',
     japaneseText: originalText, summary: '', category: topic(originalText), status: 'resolved', approvedForReuse: true,

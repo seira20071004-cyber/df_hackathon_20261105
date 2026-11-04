@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { generate, manualContent, relevance, summarize, translate } from './ai';
+import { generate, illustrate, manualContent, relevance, summarize, translate } from './ai';
 import { isScoped, languageNames, languages, mayReadManual, mayReadQuestion, mayReuse, topic, type Language, type Manual, type Match, type Profile, type Question } from './model';
 import { isDemo, list, mutate, resolveWithManual, setLanguage, slug } from './storage';
 
@@ -12,7 +12,7 @@ export const actionSchema = z.discriminatedUnion('action', [
   z.object({action: z.literal('search'), ...location, text, language: z.enum(languages)}),
   z.object({action: z.literal('ask'), ...location, text, language: z.enum(languages), id: z.uuid()}),
   z.object({action: z.literal('reply'), ...record, text, messageId: z.uuid()}),
-  z.object({action: z.literal('resolve'), ...record, text}),
+  z.object({action: z.literal('resolve'), ...record, text: z.string().trim().max(3000).optional()}),
   z.object({action: z.literal('reuse'), ...record, approved: z.boolean()}),
   z.object({action: z.literal('selfResolve'), ...location, text, language: z.enum(languages), matchId: slug, kind: z.enum(['question','manual']), id: z.uuid()}),
   z.object({action: z.literal('viewManual'), ...record, version: z.string().max(40)}),
@@ -23,7 +23,8 @@ export class ApiError extends Error {
   constructor(public status: number, message: string) {super(message);}
 }
 const date = () => new Date().toISOString();
-const newest = <T extends {createdAt: string}>(rows: T[]) => rows.sort((a,b) => b.createdAt.localeCompare(a.createdAt));
+const newest = <T extends {createdAt: string; id: string}>(rows: T[]) =>
+  rows.sort((a,b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id.localeCompare(a.id));
 function assertRole(profile: Profile, role: Profile['role']) {
   if (profile.role !== role) throw new ApiError(403, 'forbidden');
 }
@@ -70,19 +71,25 @@ async function makeQuestion(profile: Profile, siteId: string, id: string, origin
 async function createDraft(question: Question, resolution: string): Promise<Manual> {
   const unknown = '管理者による確認が必要';
   const title = (question.japaneseText || question.originalText).slice(0, 500);
-  const replies = question.messages.filter(message => message.role === 'manager').map(message => message.originalText);
-  const content = await generate(manualContent,
-    '相談の会話と解決内容をもとに日本語で図解用の作業マニュアルを作成してください。steps は図解の各カードに表示する短い手順です。会話にない方法・安全ルールや個人情報は含めず、不明なら「管理者による確認が必要」としてください。',
+  const replies = question.messages.filter(message => message.role === 'manager').flatMap(message => message.originalText.split(/\r?\n/))
+    .map(reply => reply.trim()).filter(reply => reply.length > 0 && reply.length <= 500);
+  const caution = /^(?:[※＊*]\s*|注意[：:]\s*|警告[：:]\s*|caution[:：]\s*|warning[:：]\s*)/iu;
+  const fallbackSteps = [...new Set(replies.filter(reply => !caution.test(reply)))].slice(-12);
+  const extracted = await generate(manualContent.pick({title: true, steps: true, cautions: true}),
+    '相談の会話から質問内容(title)、対処法(steps)、注意事項(cautions)だけを日本語で抽出してください。挨拶、重複、推測、個人情報は除き、質問に答えるための確認できた手順だけを整理してください。会話に明記された注意事項だけを記載し、なければ cautions は空配列にしてください。対処法が不明なら steps は「管理者による確認が必要」の1項目にしてください。',
     {question: title, conversation: question.messages.map(message => ({
       role: message.role, text: message.role === 'employee' ? message.translatedText || message.originalText : message.originalText
-    })), resolution}) ?? {
-    title, task: question.category === 'その他' ? title : question.category, purpose: unknown, tools: [],
-    steps: [...new Set(replies.filter(reply => reply.length <= 500))].slice(-11).concat([unknown]),
-    cautions: [], mistakes: [], checks: [resolution.slice(0, 500)]
+    })), resolution});
+  const content = {
+    title: extracted?.title || title, task: title, purpose: title, tools: [],
+    steps: extracted?.steps ?? (fallbackSteps.length ? fallbackSteps : [unknown]),
+    cautions: extracted?.cautions ?? [...new Set(replies.filter(reply => caution.test(reply)))].slice(-12),
+    mistakes: [], checks: []
   };
+  const imageUrls = content.steps.includes(unknown) ? [] : await illustrate(content.steps);
   const createdAt = date();
   return {id: randomUUID(), organizationId: question.organizationId, siteId: question.siteId, content, translations: {},
-    languages: ['ja'], sourceQuestionIds: [question.id], status: 'draft', approvedBy: null, imageUrls: [], createdAt, updatedAt: createdAt};
+    languages: ['ja'], sourceQuestionIds: [question.id], status: 'draft', approvedBy: null, imageUrls, createdAt, updatedAt: createdAt};
 }
 export async function execute(profile: Profile, input: Action) {
   if (input.action === 'language') {
@@ -125,12 +132,15 @@ export async function execute(profile: Profile, input: Action) {
   }
   if (input.action === 'search') {
     const matches = candidates([], manuals);
-    const ranked = matches.map(match => ({match, score: relevance(input.text, match.title + ' ' + match.answer)}))
+    const localizedTitles = new Map(manuals.map(manual => [manual.id, manual.translations[input.language]?.title ?? '']));
+    const ranked = matches.map(match => ({match, score: Math.max(relevance(input.text, match.title),
+      relevance(input.text, localizedTitles.get(match.id) ?? ''))}))
       .sort((a,b) => b.score - a.score);
     const pool = ranked.slice(0, 60).map(({match}) => match);
     const ids = pool.length ? await generate(z.object({ids: z.array(z.string()).max(3)}),
-      '質問と意味や作業内容が近い候補を最大3件選んでください。無関係なら空配列。候補のキーをそのまま返してください。',
-      {question: input.text, candidates: pool.map(match => ({id: matchKey(match), title: match.title, answer: match.answer}))}) : null;
+      '候補の対処法がユーザーの質問に直接答えられる場合だけ、適合度の高い順に最大3件選んでください。質問と候補の言語が違っても意味で比較してください。同じ設備でも質問の目的（場所、範囲、頻度、事故への対処など）が異なる候補は除外してください。該当なしなら空配列。候補のキーをそのまま返してください。',
+      {question: input.text, candidates: pool.map(match => ({id: matchKey(match), question: match.title,
+        procedure: manuals.find(manual => manual.id === match.id)?.content.steps.slice(0, 6)}))}) : null;
     const result = ids ? [...new Set(ids.ids)].flatMap(id => pool.filter(match => matchKey(match) === id)) : ranked.filter(row => row.score >= 1).slice(0,3).map(row => row.match);
     return {matches: await Promise.all(result.map(async match => {
       const manual = manuals.find(row => row.id === match.id);
@@ -146,12 +156,13 @@ export async function execute(profile: Profile, input: Action) {
     if (input.action === 'resolve') {
       assertRole(profile, 'employee');
       if (previous.status === 'resolved') return previous;
-      const manual = await createDraft(previous, input.text);
+      const resolution = input.text ?? '';
+      const manual = await createDraft(previous, resolution);
       return resolveWithManual(profile, siteId, manual, question => {
         if (!question || !mayReadQuestion(profile, question)) throw new ApiError(404, 'not-found');
         if (question.status === 'resolved') return question;
         if (question.messages.length !== previous.messages.length) throw new ApiError(409, 'conversation-updated');
-        return {...question, status: 'resolved', resolvedAt: date(), resolution: input.text};
+        return {...question, status: 'resolved', resolvedAt: date(), resolution};
       });
     }
     const source = profile.role === 'manager' ? 'ja' : previous.originalLanguage;
@@ -177,16 +188,20 @@ export async function execute(profile: Profile, input: Action) {
   if (!previous) throw new ApiError(404, 'not-found');
   if (input.publish && input.content.steps.includes('管理者による確認が必要')) throw new ApiError(400, 'review-steps');
   const translations: Manual['translations'] = {};
+  const sameSteps = JSON.stringify(previous.content.steps) === JSON.stringify(input.content.steps);
+  const illustration = sameSteps && previous.imageUrls.length ? Promise.resolve(previous.imageUrls) :
+    input.content.steps.includes('管理者による確認が必要') ? Promise.resolve([]) : illustrate(input.content.steps);
   if (input.publish) {
     await Promise.all((['en','vi'] as const).map(async language => {
       const translation = await generate(manualContent, '元の構造と作業指示を変えずに翻訳してください。追加や省略は禁止です。', {language: languageNames[language], manual: input.content});
       if (translation) translations[language] = translation;
     }));
   }
+  const imageUrls = await illustration;
   return mutate(profile, siteId, 'manuals', input.id, manual => {
     if (!manual || !isScoped(profile, manual)) throw new ApiError(404, 'not-found');
     if (manual.updatedAt !== input.version) throw new ApiError(409, 'stale-manual');
-    return {...manual, content: input.content, translations, languages: ['ja', ...Object.keys(translations) as Language[]],
+    return {...manual, content: input.content, translations, imageUrls, languages: ['ja', ...Object.keys(translations) as Language[]],
       status: input.publish ? 'published' : 'draft', approvedBy: input.publish ? profile.id : null, updatedAt: date()};
   });
 }

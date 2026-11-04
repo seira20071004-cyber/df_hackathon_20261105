@@ -5,7 +5,7 @@ import { copy } from '../lib/copy';
 import { languageNames, languages, type Language, type Manual, type ManualContent, type Match, type Question, type Workspace } from '../lib/model';
 
 type Tab = 'home' | 'cases' | 'manuals';
-const manualFields = ['title','task','purpose','tools','steps','cautions','mistakes','checks'] as const;
+const manualFields = ['title','steps','cautions'] as const;
 const glyphs = {home:'⌂', cases:'◫', manuals:'▤'};
 const siteName = (id: string) => id === 'sakura' ? 'Sakura Building' : id;
 type SpeechInput = {
@@ -30,14 +30,12 @@ function ManualView({manual, language}: {manual: Manual; language: Language}) {
   const content = manual.translations[language] ?? manual.content;
   const t = (key: Parameters<typeof copy>[1]) => copy(language, key);
   return <article className="panel manual">
-    <div className="eyebrow">{t('site')} / {siteName(manual.siteId)} · {manual.languages.map(code => languageNames[code]).join(' / ')}</div>
-    <h2>{content.title}</h2><p>{t('task')} · {content.task}</p><p>{content.purpose}</p>
+    <div className="eyebrow">{t('manualQuestion')}</div><h2>{content.title}</h2>
     {language !== 'ja' && !manual.translations[language] && <p className="muted">{t('onlyJapanese')}</p>}
-    <h3>{t('steps')}</h3>
+    <h3>{t('procedure')}</h3>
     <ol className="steps">{content.steps.map((step,index) => <li key={index}><span>{String(index + 1).padStart(2,'0')}</span>{step}</li>)}</ol>
-    <div className="manual-details">{(['tools','cautions','mistakes','checks'] as const).map(key => <section key={key}><h3>{t(key)}</h3>
-      {content[key].length ? <ul>{content[key].map((line,index) => <li key={index}>{line}</li>)}</ul> : <p className="muted">—</p>}
-    </section>)}</div>
+    {manual.imageUrls.map(url => <img className="procedure-image" key={url} src={url} alt={t('procedureImage')} loading="lazy"/>)}
+    {content.cautions.length > 0 && <section><h3>{t('cautions')}</h3><ul>{content.cautions.map((line,index) => <li key={index}>{line}</li>)}</ul></section>}
   </article>;
 }
 function Editor({manual, busy, save}: {manual: Manual; busy: boolean; save: (content: ManualContent,publish:boolean) => void}) {
@@ -48,13 +46,12 @@ function Editor({manual, busy, save}: {manual: Manual; busy: boolean; save: (con
     const publish = (event.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'publish';
     if (publish && !confirmed) return;
     const lines = (key: keyof typeof fields) => fields[key].split('\n').map(value => value.trim()).filter(Boolean);
-    save({title: fields.title, task: fields.task, purpose: fields.purpose, tools: lines('tools'), steps: lines('steps'),
-      cautions: lines('cautions'), mistakes: lines('mistakes'), checks: lines('checks')}, publish);
+    save({...manual.content, title: fields.title, steps: lines('steps'), cautions: lines('cautions')}, publish);
   }
   return <form className="panel flow" onSubmit={submit}>
     <h2>マニュアルを確認・編集</h2><p className="muted">リストは1項目ずつ改行してください。現場の条件と安全に関わる指示を確認してください。</p>
-    {manualFields.map((key,index) => <label key={key}>{copy('ja',key)}
-      {index < 3 ? <input required maxLength={500} value={fields[key]} onChange={event => {setConfirmed(false); setFields({...fields,[key]:event.target.value});}} /> :
+    {manualFields.map(key => <label key={key}>{copy('ja', key === 'title' ? 'manualQuestion' : key === 'steps' ? 'procedure' : 'cautions')}
+      {key === 'title' ? <input required maxLength={500} value={fields[key]} onChange={event => {setConfirmed(false); setFields({...fields,[key]:event.target.value});}} /> :
         <textarea rows={3} required={key === 'steps'} maxLength={6000} value={fields[key]} onChange={event => {setConfirmed(false); setFields({...fields,[key]:event.target.value});}} />}
     </label>)}
     <label className="check"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} /> 作業条件と手順を確認しました</label>
@@ -74,7 +71,6 @@ export default function BridgeWork() {
   const [query,setQuery] = useState('');
   const [results,setResults] = useState<{matches: Match[]; ai: boolean}>();
   const [message,setMessage] = useState('');
-  const [resolution,setResolution] = useState('');
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState('');
   const [reuseConfirmed,setReuseConfirmed] = useState(false);
@@ -126,7 +122,7 @@ export default function BridgeWork() {
   }
   function changeTab(next: Tab) {setTab(next); setError('');}
   function openCase(id: string) {
-    setSelected(id); setMessage(''); setResolution(''); setReuseConfirmed(false); changeTab('cases');
+    setSelected(id); setMessage(''); setReuseConfirmed(false); changeTab('cases');
   }
   function openManual(id: string) {setManualId(id); changeTab('manuals');}
   function dictate() {
@@ -211,7 +207,7 @@ export default function BridgeWork() {
           }}>{languages.map(code => <option key={code} value={code}>{languageNames[code]}</option>)}</select>
           <button className="link" disabled={busy || listening} onClick={() => {
             sessionStorage.removeItem('bridge-token'); setToken(''); setData(undefined); setLanguage('ja'); setQuery(''); setResults(undefined); setSelected('');
-            setManualId(''); setMessage(''); setResolution(''); setReuseConfirmed(false); setError(''); setTab('home'); setStatusFilter('all');
+            setManualId(''); setMessage(''); setReuseConfirmed(false); setError(''); setTab('home'); setStatusFilter('all');
           }}>{t('signout')}</button>
         </div>
       </header>
@@ -279,11 +275,10 @@ export default function BridgeWork() {
                 await send({action:'reply', id:question.id, text:message, messageId:crypto.randomUUID()}); setMessage(''); await refresh(token);
               });}}><input aria-label={t('message')} placeholder={t('message')} value={message} onChange={event => setMessage(event.target.value)} maxLength={3000} required/>
                 <button disabled={busy || !message.trim()}>{t('reply')} →</button></form>
-              {!manager && <form className="actions" onSubmit={event => {event.preventDefault();run(async () => {
-                await send({action:'resolve', id:question.id,text:resolution}); await refresh(token); setResolution('');
-              });}}><input aria-label={t('resolution')} placeholder={t('resolution')} value={resolution} onChange={event => setResolution(event.target.value)} maxLength={3000} required/>
-                <button className="secondary" disabled={busy || !resolution.trim()}>{t('resolve')}</button></form>}
-            </> : <><p className="notice">{t('resolution')} · {question.resolution}</p>
+              {!manager && <div className="actions"><button className="secondary" disabled={busy} onClick={() => run(async () => {
+                await send({action:'resolve', id:question.id}); await refresh(token);
+              })}>{t('resolve')}</button></div>}
+            </> : <>{question.resolution && <p className="notice">{t('resolution')} · {question.resolution}</p>}
               {manager && <div className="flow">
                 {!question.approvedForReuse && <label className="check"><input type="checkbox" checked={reuseConfirmed} onChange={event => setReuseConfirmed(event.target.checked)}/>
                   質問・回答・解決方法に共有できない情報が含まれていないことを確認しました</label>}
