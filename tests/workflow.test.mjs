@@ -60,6 +60,7 @@ test('Vietnamese consultation, safe reuse, and publication survive reload', {tim
   const search = (actor = 'linh') => api(actor,{action:'search',text:vi,language:'vi'});
   const sample = (await search()).matches.find(match => match.id === 'sample-manual');
   assert.ok(sample);
+  assert.equal((await api('sato')).profile.companyName,'Bridge Work デモ株式会社');
   assert.equal(sample.answer,'');
   for (const [text,language] of [['階段で滑ってけがをしたらどうすればいい？','ja'], ['How often do I clean the stairs?','en']]) {
     const unrelated = await api('linh',{action:'search',text,language});

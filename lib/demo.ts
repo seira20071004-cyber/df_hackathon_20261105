@@ -5,7 +5,7 @@ export const demoProfiles: Record<string, Profile> = Object.fromEntries([
   {id: 'linh', name: 'Linh Nguyễn', role: 'employee', preferredLanguage: 'vi'},
   {id: 'alex', name: 'Alex Smith', role: 'employee', preferredLanguage: 'en'},
   {id: 'sato', name: '佐藤 美咲', role: 'manager', preferredLanguage: 'ja'}
-].map(profile => [profile.id, {...profile, organizationId: scope.organizationId, siteIds: [scope.siteId]} as Profile]));
+].map(profile => [profile.id, {...profile,companyName:'Bridge Work デモ株式会社', organizationId: scope.organizationId, siteIds: [scope.siteId]} as Profile]));
 
 export const examples = [
   ['階段の清掃範囲はどこまでですか？', 'Which floors of the staircase should I clean?', 'Tôi cần dọn cầu thang từ tầng nào đến tầng nào?', 'このデモ現場では、1階から3階までの階段と踊り場が対象です。', 'At this demo site, clean the stairs and landings from floors 1 through 3.', 'Tại địa điểm demo này, hãy dọn cầu thang và chiếu nghỉ từ tầng 1 đến tầng 3.'],

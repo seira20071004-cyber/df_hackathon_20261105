@@ -11,7 +11,7 @@ import { languages, type Profile, type Question, type Manual, type ManualView, t
 
 export const isDemo = () => process.env.BRIDGE_DEMO === 'true';
 export const slug = z.string().regex(/^[a-zA-Z0-9_-]{1,120}$/);
-const profileSchema = z.object({name: z.string(), role: z.enum(['employee','manager']), organizationId: slug, siteIds: z.array(slug).min(1).max(30), preferredLanguage: z.enum(languages)});
+const profileSchema = z.object({name: z.string(), companyName:z.string().trim().min(1).max(200).optional(),role: z.enum(['employee','manager']), organizationId: slug, siteIds: z.array(slug).min(1).max(30), preferredLanguage: z.enum(languages)});
 function app() {
   return getApps()[0] ?? initializeApp({credential: applicationDefault(), projectId: process.env.FIREBASE_PROJECT_ID});
 }

@@ -4,6 +4,7 @@ export type Role = 'employee' | 'manager';
 export interface Profile {
   id: string;
   name: string;
+  companyName?:string;
   role: Role;
   organizationId: string;
   siteIds: string[];

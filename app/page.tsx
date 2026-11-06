@@ -4,11 +4,9 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import { copy } from '../lib/copy';
 import { ManualReview, ManualView, isGenerating } from './manual';
 import {ManualInbox,ManualSend} from './manual-delivery';
+import {Settings,WorkspaceShell,type AppTab} from './workspace-shell';
 import { languageNames, languages, type Language, type Manual, type Match, type Question, type Workspace } from '../lib/model';
 
-type Tab = 'home' | 'cases' | 'manuals';
-
-const glyphs = {home:'⌂', cases:'◫', manuals:'▤'};
 const focusSearchResults = (heading: HTMLHeadingElement | null) => heading?.focus();
 const siteName = (id: string) => id === 'sakura' ? 'Sakura Building' : id;
 type SpeechInput = {
@@ -34,7 +32,7 @@ export default function BridgeWork() {
   const [data,setData] = useState<Workspace>();
   const [demo,setDemo] = useState<boolean>();
   const [language,setLanguage] = useState<Language>('ja');
-  const [tab,setTab] = useState<Tab>('home');
+  const [tab,setTab] = useState<AppTab>('home');
   const [site,setSite] = useState('');
   const [selected,setSelected] = useState('');
   const [manualId,setManualId] = useState('');
@@ -91,7 +89,16 @@ export default function BridgeWork() {
     try {await work();} catch (caught) {setError(caught instanceof Error ? caught.message : 'server-error');}
     finally {setBusy(false);}
   }
-  function changeTab(next: Tab) {setTab(next); setError('');}
+  function changeTab(next: AppTab) {setTab(next); setError('');}
+  function changeLanguage(next:Language) {
+    if(!data)return;setLanguage(next);setResults(undefined);localStorage.setItem('bridge-language-'+data.profile.id,next);
+    request(token,{action:'language',language:next}).catch(()=>setError('server-error'));
+  }
+  function changeSite(next:string){setSite(next);setSelected('');setManualId('');setResults(undefined);}
+  function signOut(){
+    sessionStorage.removeItem('bridge-token');setToken('');setData(undefined);setLanguage('ja');setQuery('');setResults(undefined);setSelected('');
+    setManualId('');setMessage('');setReuseConfirmed(false);setError('');setTab('home');setStatusFilter('all');
+  }
   function openCase(id: string) {
     setSelected(id); setMessage(''); setReuseConfirmed(false); changeTab('cases');
   }
@@ -172,35 +179,8 @@ export default function BridgeWork() {
     </button>)}</div> : <p className="empty">{t('empty')}</p>;
   }
 
-  return <div className="app-shell">
-    <aside className="sidebar">
-      <Brand/><div className="eyebrow nav-label">{t('workspace')}</div>
-      <nav aria-label={t('workspace')}>{(['home','cases','manuals'] as Tab[]).map(item =>
-        <button key={item} className={'nav-button ' + (tab === item ? 'current' : '')} aria-current={tab === item ? 'page' : undefined} onClick={() => changeTab(item)}>
-          <span aria-hidden="true">{glyphs[item]}</span>{manager && item === 'home' ? 'ダッシュボード' : t(item)}{item==='manuals'&&unread>0&&<span className="notification-count">{unread}</span>}
-        </button>)}</nav>
-      <div className="account"><span className="avatar">{data.profile.name.slice(0,1)}</span><div><strong>{data.profile.name}</strong><small>{t(data.profile.role)}</small></div></div>
-    </aside>
-    <div className="main-shell">
-      <header className="topbar">
-        <strong>{manager && tab === 'home' ? 'ダッシュボード' : t(tab)}</strong>
-        <div className="top-actions">
-          {data.demo && <Badge variant="demo">{t('demo')}</Badge>}
-          <select aria-label={t('site')} value={site} disabled={busy || listening} onChange={event => {
-            setSite(event.target.value); setSelected(''); setManualId(''); setResults(undefined);
-          }}>{data.profile.siteIds.map(id => <option key={id} value={id}>{siteName(id)}</option>)}</select>
-          <select aria-label="Language" value={language} disabled={busy || listening} onChange={event => {
-            const next = event.target.value as Language;
-            setLanguage(next); setResults(undefined); localStorage.setItem('bridge-language-' + data.profile.id,next);
-            request(token,{action:'language',language:next}).catch(() => setError('server-error'));
-          }}>{languages.map(code => <option key={code} value={code}>{languageNames[code]}</option>)}</select>
-          <button className="link" disabled={busy || listening} onClick={() => {
-            sessionStorage.removeItem('bridge-token'); setToken(''); setData(undefined); setLanguage('ja'); setQuery(''); setResults(undefined); setSelected('');
-            setManualId(''); setMessage(''); setReuseConfirmed(false); setError(''); setTab('home'); setStatusFilter('all');
-          }}>{t('signout')}</button>
-        </div>
-      </header>
-      <main className="content flow">
+  return <WorkspaceShell profile={data.profile} language={language} tab={tab} unread={unread} demo={data.demo} busy={busy||listening} onNavigate={changeTab} onSignOut={signOut}>
+        {tab==='settings'&&<Settings profile={data.profile} language={language} site={site} busy={busy||listening} onLanguage={changeLanguage} onSite={changeSite}/>}
         {error && <p className="alert" role="alert">{errorText}</p>}
         {busy && <p className="busy" role="status">{t('searching')}</p>}
         {tab === 'home' && !manager && <>
@@ -326,7 +306,5 @@ export default function BridgeWork() {
           </>}
         </>}
         <footer>Bridge Work <span>·</span> {siteName(site)}</footer>
-      </main>
-    </div>
-  </div>;
+  </WorkspaceShell>;
 }

@@ -32,6 +32,7 @@ export function ManualView({manual, language, onSelectStep}: {manual: Manual; la
     finally{setExporting(false);}
   }
   return <div className="manual-with-download"><div className="manual-downloads" aria-label="マニュアルをダウンロード">
+    <span className="badge">A4 · 1枚</span>
     <button className="secondary" type="button" disabled={exporting} onClick={()=>download('pdf')}>↓ PDF</button>
     <button className="secondary" type="button" disabled={exporting} onClick={()=>download('jpeg')}>↓ JPEG</button>
     {exporting && <span role="status">作成中…</span>}{exportError && <p role="alert">{exportError}</p>}
