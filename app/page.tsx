@@ -133,6 +133,7 @@ export default function BridgeWork() {
     });
   }
   const errorText = error === 'generation-running' ? '現在マニュアルを生成しています。完了後に操作できます。'
+    : error === 'review-evidence' ? '原文との照合が完了していません。再生成するか、内容を修正して未確認として保存し、改めて確認してください。'
     : error === 'review-images' ? '編集内容を保存し、図解を再生成してから確認済にしてください。'
     : error === 'ai-not-configured' ? 'Gemini の設定が必要です。'
     : error === 'source-missing' ? '参照元の会話がありません。文章を編集して図解を再生成できます。'

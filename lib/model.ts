@@ -60,7 +60,7 @@ export interface Manual {
   createdAt: string;
   updatedAt: string;
   generation?: {
-    state: 'queued' | 'writing' | 'illustrating' | 'ready' | 'failed';
+    state: 'queued' | 'analyzing' | 'writing' | 'validating' | 'illustrating' | 'ready' | 'failed';
     attemptId: string;
     startedAt: string;
     error?: string;
@@ -70,6 +70,20 @@ export interface Manual {
     cautions: {messageId: string; quote: string}[][];
   };
   imageLayout?: 'steps';
+  pipeline?: {
+    promptVersion:string;
+    contextHash:string;
+    contextBytes:number;
+    messageCount:number;
+    provider:'vertex'|'developer';
+    model:string;
+    factCount:number;
+    supersededCount:number;
+    facts?:{id:string;kind:'action'|'scope'|'condition'|'caution';text:string;status:'current'|'superseded';messageIds:string[]}[];
+    verification:'pending'|'passed'|'blocked'|'edited';
+    issues:string[];
+    verifiedAt?:string;
+  };
 }
 export interface StairRange {
   kind: 'stair-range';

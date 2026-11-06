@@ -214,3 +214,9 @@ footer { color:var(--muted); font-size:.8rem; text-align:center; padding:8px; }
   .app-shell { display:block; }
   .manual { box-shadow:none; border:none; }
 }
+.pipeline-report { border:1px solid #d9e2f2; border-radius:12px; padding:14px 18px; background:#f8faff; }
+.pipeline-report summary { cursor:pointer; font-weight:700; color:#334d83; }
+.pipeline-report dl { display:grid; gap:8px; margin:16px 0; }
+.pipeline-report dl>div { display:grid; grid-template-columns:110px 1fr; gap:12px; }
+.pipeline-report dt { color:#64748b; }
+.pipeline-report dd { margin:0; overflow-wrap:anywhere; }

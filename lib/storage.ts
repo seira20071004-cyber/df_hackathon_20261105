@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import { join } from 'node:path';
 import { applicationDefault, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
@@ -77,7 +78,17 @@ function mutateDemo<T>(update: (data: DemoState) => T) {
     await mkdir(folder, {recursive: true});
     const temp = join(folder, randomUUID() + '.tmp');
     await writeFile(temp, JSON.stringify(data), 'utf8');
-    await rename(temp, demoFile);
+    try {
+      // Windows readers/antivirus can briefly hold the destination open. Preserve
+      // atomic replacement; never delete the current file to get around the lock.
+      for(let attempt=0;;attempt++) {
+        try {await rename(temp,demoFile);break;}
+        catch(error) {
+          if(process.platform!=='win32' || !['EPERM','EBUSY','EACCES'].includes((error as NodeJS.ErrnoException).code ?? '') || attempt>=5) throw error;
+          await delay(15 * 2 ** attempt);
+        }
+      }
+    } catch(error) {await rm(temp,{force:true}).catch(()=>undefined);throw error;}
     return next;
   });
   pending = operation.then(() => undefined, () => undefined);

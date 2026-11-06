@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { after } from 'next/server';
 import { z } from 'zod';
-import { generate, manualContent, relevance, summarize, translate } from './ai';
+import { aiConfigured, generate, manualContent, relevance, summarize, translate } from './ai';
 import { buildManual, generationRunning } from './manuals';
 import { stairRange } from './diagrams';
 import { isScoped, languageNames, languages, mayReadManual, mayReadQuestion, mayReuse, topic, type Language, type Manual, type Match, type Profile, type Question } from './model';
@@ -45,9 +45,9 @@ export async function workspace(profile: Profile) {
       .flatMap(question => question.references).filter(reference => reference.kind === 'manual' && !reference.version);
     return {...site, manuals: site.manuals.filter(manual => mayReadManual(profile, manual) &&
       (viewed.some(view => view.manualId === manual.id && view.version === manual.updatedAt) ||
-        legacyReferences.some(reference => reference.id === manual.id))).map(({evidence, ...manual}) => manual)};
+        legacyReferences.some(reference => reference.id === manual.id))).map(({evidence, pipeline, ...manual}) => manual)};
   }));
-  return {profile, demo: isDemo(), ai: Boolean(process.env.GEMINI_API_KEY),
+  return {profile, demo: isDemo(), ai: aiConfigured(),
     questions: newest(sites.flatMap(site => site.questions.filter(row => mayReadQuestion(profile,row)))),
     manuals: newest(sites.flatMap(site => site.manuals.filter(row => mayReadManual(profile,row))))};
 }
@@ -88,8 +88,8 @@ function createDraft(question: Question): Manual {
   const createdAt = date();
   return {id: randomUUID(), organizationId: question.organizationId, siteId: question.siteId, content, translations: {},
     languages: ['ja'], sourceQuestionIds: [question.id], status: 'draft', approvedBy: null, imageUrls: [], createdAt, updatedAt: createdAt,
-    generation: {state: process.env.GEMINI_API_KEY ? 'queued' : 'failed', attemptId: randomUUID(), startedAt: createdAt,
-      ...(!process.env.GEMINI_API_KEY ? {error:'not-configured'} : {})}};
+    generation: {state: aiConfigured() ? 'queued' : 'failed', attemptId: randomUUID(), startedAt: createdAt,
+      ...(!aiConfigured() ? {error:'not-configured'} : {})}};
 }
 export async function execute(profile: Profile, input: Action) {
   if (input.action === 'language') {
@@ -128,7 +128,7 @@ export async function execute(profile: Profile, input: Action) {
     await mutate(profile, siteId, 'manualViews', id, () => ({
       id, employeeId: profile.id, organizationId: profile.organizationId, siteId, manualId: manual.id, version: manual.updatedAt
     }));
-    const {evidence, ...viewable} = manual;
+    const {evidence, pipeline, ...viewable} = manual;
     return viewable;
   }
   if (input.action === 'search') {
@@ -165,7 +165,7 @@ export async function execute(profile: Profile, input: Action) {
         if (question.messages.length !== previous.messages.length) throw new ApiError(409, 'conversation-updated');
         return {...question, status: 'resolved', resolvedAt: date(), resolution};
       });
-      if (result.created && process.env.GEMINI_API_KEY) {
+      if (result.created && aiConfigured()) {
         after(() => buildManual(profile, manual, result.question, false));
       }
       return result.question;
@@ -192,7 +192,7 @@ export async function execute(profile: Profile, input: Action) {
   const previous = manuals.find(manual => manual.id === input.id);
   if (!previous) throw new ApiError(404, 'not-found');
   if (input.action === 'regenerateManual') {
-    if (!process.env.GEMINI_API_KEY) throw new ApiError(503, 'ai-not-configured');
+    if (!aiConfigured()) throw new ApiError(503, 'ai-not-configured');
     const question = questions.find(row => previous.sourceQuestionIds.includes(row.id));
     if (!input.imagesOnly && !question) throw new ApiError(400, 'source-missing');
     const draft = await mutate(profile, siteId, 'manuals', input.id, manual => {
@@ -200,6 +200,7 @@ export async function execute(profile: Profile, input: Action) {
       if (manual.updatedAt !== input.version) throw new ApiError(409, 'stale-manual');
       if (generationRunning(manual)) throw new ApiError(409, 'generation-running');
       return {...manual, status: 'draft', approvedBy: null, translations: {}, languages: ['ja'], updatedAt: date(),
+        ...(!input.imagesOnly && manual.pipeline ? {pipeline:{...manual.pipeline,verification:'pending',issues:[]}} : {}),
         generation: {state: 'queued', startedAt: date(), attemptId: randomUUID()}};
     });
     after(() => buildManual(profile, draft, question, input.imagesOnly));
@@ -210,8 +211,9 @@ export async function execute(profile: Profile, input: Action) {
   const translations: Manual['translations'] = {};
   const sameSteps = JSON.stringify(previous.content.steps) === JSON.stringify(input.content.steps);
   const sameContent = JSON.stringify(previous.content) === JSON.stringify(input.content);
+  if(input.publish && previous.pipeline && ['pending','blocked'].includes(previous.pipeline.verification)) throw new ApiError(400,'review-evidence');
   const rangeDiagram = stairRange(input.content.steps.join(' '));
-  if (input.publish && process.env.GEMINI_API_KEY && (!sameSteps || (!previous.imageUrls.length && !rangeDiagram))) throw new ApiError(400, 'review-images');
+  if (input.publish && aiConfigured() && (!sameSteps || (!previous.imageUrls.length && !rangeDiagram))) throw new ApiError(400, 'review-images');
   if (input.publish) {
     await Promise.all((['en','vi'] as const).map(async language => {
       const translation = await generate(manualContent, '元の構造と作業指示を変えずに翻訳してください。追加や省略は禁止です。', {language: languageNames[language], manual: input.content});
@@ -225,6 +227,7 @@ export async function execute(profile: Profile, input: Action) {
     const next: Manual = {...manual, content: input.content, translations, imageUrls: sameSteps ? manual.imageUrls : [],
       ...(sameSteps ? {} : {imageLayout: 'steps' as const}),
       evidence: sameContent ? manual.evidence ?? {steps: [], cautions: []} : {steps: [], cautions: []},
+      ...(manual.pipeline && !sameContent ? {pipeline:{...manual.pipeline,verification:'edited' as const,issues:[]}} : {}),
       generation: sameSteps ? manual.generation ?? {state:'ready', attemptId:randomUUID(), startedAt:date()} :
         {state:'failed', error:'content-changed', attemptId:randomUUID(), startedAt:date()},
       languages: ['ja', ...Object.keys(translations) as Language[]],

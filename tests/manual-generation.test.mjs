@@ -22,6 +22,7 @@ test('illustrated manuals preserve evidence, approval and regeneration boundarie
   child.stdout.on('data',buffer=>log+=buffer);
   child.stderr.on('data',buffer=>log+=buffer);
   t.after(async()=>{
+    if(log.includes('Manual generation failed')) t.diagnostic(log);
     if(child.exitCode===null) {
       const exit=new Promise(resolve=>child.once('exit',resolve));
       child.kill();await exit;
@@ -63,11 +64,16 @@ test('illustrated manuals preserve evidence, approval and regeneration boundarie
   }
   const draft=await resolveQuestion('洗剤はどこに保管されていますか？');
   let manual=await completed(draft.id);
-  assert.equal(manual.generation.state,'ready');
+  assert.equal(manual.generation.state,'ready',JSON.stringify({generation:manual.generation,pipeline:manual.pipeline})+'\n'+log);
   assert.equal(manual.imageLayout,'steps');
   assert.equal(manual.imageUrls.length,2);
   assert.ok(manual.imageUrls.every(url=>url.startsWith('data:image/webp;base64,')));
   assert.equal(manual.evidence.steps.length,2);
+  assert.equal(manual.pipeline.verification,'passed');
+  assert.equal(manual.pipeline.promptVersion,'bridge-manual-v2.0');
+  assert.match(manual.pipeline.contextHash,/^[a-f0-9]{64}$/);
+  assert.equal(manual.pipeline.messageCount,1);
+  assert.equal(manual.pipeline.facts[0].status,'current');
   assert.deepEqual(manual.content.cautions,[]);
   assert.equal((await api('alex')).manuals.length,0);
   await api('linh',{action:'regenerateManual',id:manual.id,version:manual.updatedAt,imagesOnly:true},403);
@@ -75,13 +81,16 @@ test('illustrated manuals preserve evidence, approval and regeneration boundarie
   manual=(await api('sato')).manuals.find(row=>row.id===manual.id);
   const result=await api('alex',{action:'viewManual',id:manual.id,version:manual.updatedAt});
   assert.equal(result.evidence,undefined);
+  assert.equal(result.pipeline,undefined);
   assert.equal((await api('alex')).manuals[0].evidence,undefined);
+  assert.equal((await api('alex')).manuals[0].pipeline,undefined);
   const edited={...manual.content,steps:['編集した対処法']};
   await api('sato',{action:'saveManual',id:manual.id,version:manual.updatedAt,content:edited,publish:true},400);
   await api('sato',{action:'saveManual',id:manual.id,version:manual.updatedAt,content:edited,publish:false});
   manual=(await api('sato')).manuals.find(row=>row.id===manual.id);
   assert.equal(manual.imageUrls.length,0);
   assert.equal(manual.generation.error,'content-changed');
+  assert.equal(manual.pipeline.verification,'edited');
   assert.equal((await api('alex')).manuals.some(row=>row.id===manual.id),false);
   await api('sato',{action:'regenerateManual',id:manual.id,version:manual.updatedAt,imagesOnly:true});
   manual=await completed(manual.id);
@@ -91,6 +100,14 @@ test('illustrated manuals preserve evidence, approval and regeneration boundarie
   const invalid=await completed((await resolveQuestion('根拠失敗の質問')).id);
   assert.equal(invalid.generation.error,'unverified-source');
   assert.equal(invalid.imageUrls.length,0);
+  const semanticFailure=await completed((await resolveQuestion('意味失敗の質問')).id);
+  assert.equal(semanticFailure.generation.error,'semantic-mismatch');
+  assert.equal(semanticFailure.pipeline.verification,'blocked');
+  assert.equal(semanticFailure.imageUrls.length,0);
+  await api('sato',{action:'saveManual',id:semanticFailure.id,version:semanticFailure.updatedAt,content:semanticFailure.content,publish:true},400);
+  const unresolved=await completed((await resolveQuestion('矛盾失敗の質問')).id);
+  assert.equal(unresolved.generation.error,'context-unresolved');
+  assert.equal(unresolved.pipeline.verification,'blocked');
   const imageFailure=await completed((await resolveQuestion('画像失敗の質問')).id);
   assert.equal(imageFailure.generation.error,'quota');
   assert.equal(imageFailure.status,'draft');

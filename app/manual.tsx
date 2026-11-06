@@ -7,8 +7,8 @@ import { stairRange } from '../lib/diagrams';
 import { RangeDiagram } from './range-diagram';
 
 export function isGenerating(manual: Manual) {
-  return Boolean(manual.generation && ['queued','writing','illustrating'].includes(manual.generation.state) &&
-    Date.now() - Date.parse(manual.generation.startedAt) < 180_000);
+  return Boolean(manual.generation && ['queued','analyzing','writing','validating','illustrating'].includes(manual.generation.state) &&
+    Date.now() - Date.parse(manual.generation.startedAt) < 300_000);
 }
 
 export function ManualView({manual, language, onSelectStep}: {manual: Manual; language: Language; onSelectStep?:(index:number)=>void}) {
@@ -67,6 +67,11 @@ const errors: Record<string,string> = {
   'no-image':'画像を取得できませんでした。図解を再生成できます。',
   'provider-error':'生成サービスから結果を取得できませんでした。再度お試しください。',
   'image-too-large':'生成画像のサイズが保存上限を超えました。図解を再生成できます。'
+  ,'context-unresolved':'会話に矛盾や必要情報の不足があります。管理者の回答を確認してください。'
+  ,'semantic-mismatch':'原文との照合で不一致が見つかりました。下の検査結果を確認して再生成または編集してください。'
+  ,'verification-unavailable':'原文との照合が完了しませんでした。確認済にはせず、再生成してください。'
+  ,'context-limit':'会話が処理上限を超えています。会話を切り捨てずに生成を停止しました。'
+  ,'context-scope':'現場の範囲を確認できないため、生成を停止しました。'
 };
 export function ManualReview({manual, questions, busy, ai, regenerate, save}: {
   manual: Manual; questions: Question[]; busy: boolean; ai: boolean;
@@ -82,20 +87,31 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save}: {
   const highlighted = new Set(citations.map(citation=>citation.messageId));
   const fallbackReply = sources.flatMap(source=>source.messages).filter(message=>message.role==='manager').at(-1);
   if (!highlighted.size && fallbackReply) highlighted.add(fallbackReply.id);
-  const stateLabel = generating ? state === 'illustrating' ? '手順に合わせた図解を生成中' : '会話から対処法を整理中' :
+  const stateLabel = generating ? state === 'illustrating' ? '手順に合わせた図解を生成中' : state==='validating' ? '原文との意味・条件の一致を照合中' : state==='analyzing' ? '確定情報と訂正を抽出中' : '会話から対処法を整理中' :
     state === 'failed' ? '生成内容の確認が必要です' : manual.status === 'published' ? '確認済みのマニュアル' : '公開前の内容確認';
   return <section className="panel flow review-panel">
     <div className="split"><div><div className="eyebrow">MANUAL STUDIO</div><h2>{stateLabel}</h2></div>
       <span className={'badge ' + (manual.status === 'published' ? 'resolved' : 'active')}>{manual.status === 'published' ? '確認済' : '未確認'}</span></div>
     <div className="generation-track" role="status" aria-live="polite">
-      {['会話を整理','図解を生成','管理者が確認'].map((label,index) => <span key={label}
-        className={generating ? index === (state === 'illustrating' ? 1 : 0) ? 'progress-active' : '' : index === 2 ? 'progress-active' : 'progress-done'}>
+      {['確定情報を抽出','手順を編集','原文と照合','図解を生成','管理者が確認'].map((label,index) => <span key={label}
+        className={generating ? index === (state === 'illustrating' ? 3 : state==='validating' ? 2 : state==='writing' ? 1 : 0) ? 'progress-active' : '' : index === 4 ? 'progress-active' : 'progress-done'}>
         <b>{index + 1}</b>{label}
       </span>)}
     </div>
     {state === 'failed' && <p className="notice">{errors[manual.generation?.error ?? 'provider-error'] ?? errors['provider-error']}</p>}
-    {manual.generation && !generating && ['queued','writing','illustrating'].includes(state ?? '') &&
+    {manual.generation && !generating && ['queued','analyzing','writing','validating','illustrating'].includes(state ?? '') &&
       <p className="notice">生成が中断された可能性があります。再生成して続行できます。</p>}
+    {manual.pipeline && <details className="pipeline-report"><summary>原文との照合：{manual.pipeline.verification==='passed' ? '一致を確認（管理者の確認が必要）' : manual.pipeline.verification==='blocked' ? '不一致・不足あり' : manual.pipeline.verification==='edited' ? '管理者が編集・AI照合対象外' : '処理中・未完了'}</summary>
+      <dl><div><dt>確定情報</dt><dd>{manual.pipeline.factCount}件／訂正前として除外 {manual.pipeline.supersededCount}件</dd></div>
+        <div><dt>参照した会話</dt><dd>{manual.pipeline.messageCount}発言・この現場の相談のみ</dd></div>
+        <div><dt>生成設定</dt><dd>{manual.pipeline.provider==='vertex' ? 'Vertex AI' : 'Gemini API'} · {manual.pipeline.model} · {manual.pipeline.promptVersion}</dd></div>
+        <div><dt>会話の識別子</dt><dd><code>{manual.pipeline.contextHash.slice(0,16)}</code></dd></div></dl>
+      {manual.pipeline.issues.length>0 && <ul>{manual.pipeline.issues.map((issue,index)=><li key={index}>{issue}</li>)}</ul>}
+      {Boolean(manual.pipeline.facts?.length) && <ul className="fact-ledger">{manual.pipeline.facts!.map(fact=><li key={fact.id}>
+        <span className={'badge '+(fact.status==='current'?'resolved':'active')}>{fact.status==='current'?'採用':'訂正前・除外'}</span> {fact.text}
+      </li>)}</ul>}
+      <p className="muted">AIの照合は正しさを保証しません。図解と実際の作業条件は管理者が確認します。</p>
+    </details>}
     <div className="actions">
       <button className="secondary" disabled={busy || generating || !ai || !sources.length} onClick={() => regenerate(false)}>✧ 会話から作り直す</button>
       <button className="secondary" disabled={busy || generating || !ai} onClick={() => regenerate(true)}>▧ 図解を再生成</button>
@@ -133,7 +149,7 @@ function ReviewApproval({manual,busy,onEdit,save}: {manual:Manual; busy:boolean;
   return <div className="review-approval">
     <label className="check"><input type="checkbox" checked={checked} onChange={event=>setChecked(event.target.checked)}/>会話・作業条件・図解の一致を確認</label>
     <div className="actions"><button className="secondary" disabled={busy} onClick={onEdit}>編集する</button>
-      <button disabled={busy || !checked || manual.status==='published'} onClick={()=>save(manual.content,true)}>✓ 確認済にする</button></div>
+      <button disabled={busy || !checked || manual.status==='published' || Boolean(manual.pipeline && ['pending','blocked'].includes(manual.pipeline.verification))} onClick={()=>save(manual.content,true)}>✓ 確認済にする</button></div>
   </div>;
 }
 
@@ -144,7 +160,7 @@ function ManualEditor({manual,busy,save}: {manual:Manual; busy:boolean; save:(co
   const [confirmed,setConfirmed] = useState(false);
   const content = {...manual.content,title,steps,cautions};
   const changedSteps = JSON.stringify(steps) !== JSON.stringify(manual.content.steps);
-  const canPublish = !busy && confirmed && !changedSteps;
+  const canPublish = !busy && confirmed && !changedSteps && !Boolean(manual.pipeline && ['pending','blocked'].includes(manual.pipeline.verification));
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const publish = (event.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'publish';
