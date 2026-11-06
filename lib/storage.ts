@@ -6,6 +6,7 @@ import { applicationDefault, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore, type CollectionReference } from 'firebase-admin/firestore';
 import { z } from 'zod';
+import {preservePublication,releasedManual} from './publication';
 import { demoProfiles, seedDemo } from './demo';
 import { languages, type Profile, type Question, type Manual, type ManualView, type ManualDelivery, type StaffRecipient,type ManualUse } from './model';
 
@@ -15,14 +16,22 @@ const profileSchema = z.object({name: z.string(), companyName:z.string().trim().
 function app() {
   return getApps()[0] ?? initializeApp({credential: applicationDefault(), projectId: process.env.FIREBASE_PROJECT_ID});
 }
-export async function authenticate(token: string): Promise<Profile | null> {
-  if (isDemo()) return Object.hasOwn(demoProfiles, token) ? {...demoProfiles[token]} : null;
+export async function authenticate(token: string,organizationId?:string): Promise<Profile | null> {
+  if (isDemo()) return Object.hasOwn(demoProfiles, token)&&(!organizationId||organizationId===demoProfiles[token].organizationId) ? {...demoProfiles[token]} : null;
   if (!token) return null;
   const user = await getAuth(app()).verifyIdToken(token, true).catch(() => null);
   if (!user) return null;
   const doc = await getFirestore(app()).collection('users').doc(user.uid).get();
   const profile = profileSchema.safeParse(doc.data());
-  return profile.success ? {...profile.data, id: user.uid} : null;
+  if(!profile.success)return null;
+  if(organizationId&&organizationId!==profile.data.organizationId){
+    if(!slug.safeParse(organizationId).success)return null;
+    const member=await getFirestore(app()).collection('organizations').doc(organizationId).collection('members').doc(user.uid).get();
+    const membership=z.object({active:z.literal(true),role:z.enum(['employee','manager']),siteIds:z.array(slug).min(1).max(30)}).safeParse(member.data());
+    if(!membership.success)return null;
+    return {...profile.data,...membership.data,organizationId,id:user.uid};
+  }
+  return {...profile.data, id: user.uid};
 }
 export async function setLanguage(profile: Profile, preferredLanguage: Profile['preferredLanguage']) {
   if (!isDemo()) await getFirestore(app()).collection('users').doc(profile.id).update({preferredLanguage});
@@ -63,13 +72,13 @@ export async function deliverManual(profile:Profile,siteId:string,manualId:strin
   const create=(employeeId:string,index:number):ManualDelivery=>({id:ids[index],organizationId:profile.organizationId,siteId,manualId,version,
     employeeId,sentBy:profile.id,createdAt:new Date().toISOString(),readAt:null});
   if(isDemo())return mutateDemo(data=>{
-    check(data.manuals.find(row=>row.id===manualId),recipientIds.map(id=>demoProfiles[id]));
+    const stored=data.manuals.find(row=>row.id===manualId);check(stored&&releasedManual(stored),recipientIds.map(id=>demoProfiles[id]));
     recipientIds.forEach((employeeId,index)=>{if(!data.manualDeliveries.some(row=>row.id===ids[index]))data.manualDeliveries.push(create(employeeId,index));});
     return {sent:recipientIds.length};
   });
   const manualDoc=collection(profile,siteId,'manuals').doc(manualId);
   return manualDoc.firestore.runTransaction(async tx=>{
-    const manual=(await tx.get(manualDoc)).data();
+    const stored=(await tx.get(manualDoc)).data();const manual=stored&&releasedManual(stored);
     const users=await tx.getAll(...recipientIds.map(id=>getFirestore(app()).collection('users').doc(id)));
     check(manual,users.map(doc=>{const result=profileSchema.safeParse(doc.data());return result.success?{...result.data,id:doc.id}:undefined;}));
     const deliveryDocs=ids.map(id=>collection(profile,siteId,'manualDeliveries').doc(id));
@@ -85,23 +94,30 @@ function collection<T extends Table>(profile: Profile, siteId: string, table: T)
 }
 export async function list<T extends Table>(profile: Profile, siteId: string, table: T): Promise<Records[T][]> {
   if (!profile.siteIds.includes(siteId)) return [];
-  if (isDemo()) return (await readDemo())[table];
+  if (isDemo()) return (await readDemo())[table].filter(row=>row.organizationId===profile.organizationId&&row.siteId===siteId);
   const snapshot = await collection(profile, siteId, table).get();
-  return snapshot.docs.map(doc => doc.data());
+  return snapshot.docs.map(doc => doc.data()).filter(row=>row.organizationId===profile.organizationId&&row.siteId===siteId);
 }
 export async function mutate<T extends Table>(profile: Profile, siteId: string, table: T, id: string, update: (previous: Records[T] | undefined) => Records[T]) {
   if (!profile.siteIds.includes(siteId)) throw new Error('Forbidden site');
+  function checked(previous:Records[T]|undefined){
+    if(previous&&(previous.id!==id||previous.organizationId!==profile.organizationId||previous.siteId!==siteId))throw new Error('scope-conflict');
+    let next=update(previous);
+    if(next.id!==id||next.organizationId!==profile.organizationId||next.siteId!==siteId)throw new Error('scope-conflict');
+    if(table==='manuals')next=preservePublication(previous as Manual|undefined,next as Manual) as Records[T];
+    if(Buffer.byteLength(JSON.stringify(next))>950_000)throw new Error('record-too-large');return next;
+  }
   if (!isDemo()) {
     const doc = collection(profile, siteId, table).doc(id);
     return doc.firestore.runTransaction(async tx => {
-      const next = update((await tx.get(doc)).data());
+      const next = checked((await tx.get(doc)).data());
       tx.set(doc, next);
       return next;
     });
   }
   return mutateDemo(data => {
     const records = data[table];
-    const next = update(records.find(record => record.id === id));
+    const next = checked(records.find(record => record.id === id));
     const index = records.findIndex(record => record.id === id);
     if (index === -1) records.push(next);
     else records[index] = next;
@@ -133,6 +149,7 @@ function mutateDemo<T>(update: (data: DemoState) => T) {
 }
 
 export async function resolveWithManual(profile: Profile, siteId: string, manual: Manual, update: (previous: Question | undefined) => Question) {
+  if(profile.role!=='employee'||!profile.siteIds.includes(siteId)||manual.organizationId!==profile.organizationId||manual.siteId!==siteId||manual.status!=='draft'||manual.approvedBy)throw new Error('scope-conflict');
   const id = manual.sourceQuestionIds[0];
   if (!isDemo()) {
     const questionDoc = collection(profile, siteId, 'questions').doc(id);
@@ -164,6 +181,7 @@ export async function recordManualSession(profile:Profile,record:ManualUse,quest
   if(profile.role!=='employee'||!profile.siteIds.includes(siteId)||record.organizationId!==profile.organizationId||record.employeeId!==profile.id)throw new Error('forbidden');
   const viewId=createHash('sha256').update(JSON.stringify([profile.id,record.manualId])).digest('hex');
   function validate(manual:Manual|undefined,view:ManualView|undefined,previous:ManualUse|undefined){
+    manual=manual&&releasedManual(manual);
     if(!manual||manual.organizationId!==profile.organizationId||manual.siteId!==siteId||manual.status!=='published'||manual.updatedAt!==record.version||!manual.program)throw new Error('manual-unavailable');
     if(!view||view.employeeId!==profile.id||view.version!==record.version)throw new Error('manual-unavailable');
     if(previous&&(previous.employeeId!==profile.id||previous.manualId!==record.manualId||previous.version!==record.version))throw new Error('session-conflict');

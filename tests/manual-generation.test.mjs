@@ -14,7 +14,7 @@ test('SDK pipeline, supplements, approval, sessions and escalation remain scoped
  seed.manuals.push({...structuredClone(seed.manuals[0]),id:'foreign-manual',organizationId:'other-company',content:{...seed.manuals[0].content,title:'他組織だけの秘密情報'}});
  await writeFile(join(folder,'data.json'),JSON.stringify(seed));
  const socket=createServer();await new Promise(resolve=>socket.listen(0,'127.0.0.1',resolve));const port=socket.address().port;await new Promise(resolve=>socket.close(resolve));
- const child=spawn(process.execPath,['--import',new URL('./provider-mock.mjs',import.meta.url).href,join(root,'node_modules/next/dist/bin/next'),'start','-H','127.0.0.1','-p',String(port)],{cwd:root,env:{...process.env,BRIDGE_DEMO:'true',BRIDGE_DEMO_DATA_DIR:folder,GEMINI_API_KEY:'test-fixture',GEMINI_PROVIDER:'developer',GOOGLE_GENAI_USE_VERTEXAI:'false',GEMINI_GENERATE_IMAGES:'false',GEMINI_EMBEDDING_MODEL:'test-embedding'},stdio:['ignore','pipe','pipe']});
+ const child=spawn(process.execPath,['--import',new URL('./provider-mock.mjs',import.meta.url).href,join(root,'node_modules/next/dist/bin/next'),'start','-H','127.0.0.1','-p',String(port)],{cwd:root,env:{...process.env,BRIDGE_DEMO:'true',BRIDGE_ALLOW_PUBLIC_DEMO:'true',BRIDGE_USER_REQUESTS_PER_MINUTE:'10000',BRIDGE_ORG_REQUESTS_PER_MINUTE:'20000',BRIDGE_AI_CALLS_PER_MINUTE:'10000',BRIDGE_DEMO_DATA_DIR:folder,GEMINI_API_KEY:'test-fixture',GEMINI_PROVIDER:'developer',GOOGLE_GENAI_USE_VERTEXAI:'false',GEMINI_GENERATE_IMAGES:'false',GEMINI_EMBEDDING_MODEL:'test-embedding'},stdio:['ignore','pipe','pipe']});
  let log='';child.stdout.on('data',data=>log+=data);child.stderr.on('data',data=>log+=data);
  t.after(async()=>{if(child.exitCode===null){const stopped=new Promise(resolve=>child.once('exit',resolve));child.kill();await stopped;}await rm(folder,{recursive:true,force:true});});
  const url='http://127.0.0.1:'+port+'/api/bridge';let ready=false;
@@ -60,7 +60,7 @@ test('SDK pipeline, supplements, approval, sessions and escalation remain scoped
  const limitSource=await resolveQuestion('上限の追加確認');let limited=await completed(limitSource.manual.id);
  for(let round=1;round<=3;round++){assert.equal(limited.clarification.round,round);await api('sato',{action:'answerManual',id:limited.id,version:limited.updatedAt,answers:limited.clarification.questions.map(question=>({questionId:question.id,answer:'管理者の確認回答 '+round}))});limited=await completed(limited.id);}
  assert.equal(limited.reviewState,'held');assert.ok(limited.quality.issues.some(issue=>issue.includes('上限')));
- for(const [title,state,error] of [['根拠失敗の相談','held'],['意味失敗の相談','held'],['構造失敗の相談','held'],['不正JSONの相談','failed','invalid-json'],['API障害の相談','failed','provider-error'],['利用枠エラーの相談','failed','quota']]){
+ for(const [title,state,error] of [['根拠失敗の相談','held'],['意味失敗の相談','held'],['構造失敗の相談','held'],['不正JSONの相談','failed','invalid-json'],['API障害の相談','failed','provider-error'],['利用枠エラーの相談','failed','quota'],['APIタイムアウトの相談','failed','generation-timeout']]){
   const broken=await completed((await resolveQuestion(title)).manual.id);assert.equal(broken.generation.state,state,JSON.stringify(broken)+'\n'+log);assert.equal(broken.status,'draft');if(error)assert.equal(broken.generation.error,error);
  }
  const branch=await completed((await resolveQuestion('分岐の商品登録')).manual.id);assert.ok(branch.program.blocks.some(block=>block.type==='branch'));assert.ok(branch.program.blocks.some(block=>block.type==='warning'));

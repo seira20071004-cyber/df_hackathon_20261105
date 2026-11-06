@@ -150,7 +150,8 @@ export default function BridgeWork() {
       setQuery(''); setResults(undefined); openCase(created.id);
     });
   }
-  const errorText = error === 'generation-running' ? '現在マニュアルを生成しています。完了後に操作できます。'
+  const securityErrors:Record<string,string>={'privacy-review':'機密情報の検出、または機密検査を完了できないため公開を保留しました。本文と検査設定を確認してください。画像の検査に未対応の環境では画像付きマニュアルを公開できません。','save-before-approve':'変更を未確認として保存してから、その版を確認・承認してください。','rate-limited':'利用回数の上限に達しました。少し時間をおいて再度操作してください。','app-check-required':'アプリの正当性を確認できません。App Checkの設定を確認してください。'};
+  const errorText = securityErrors[error] ?? (error === 'generation-running' ? '現在マニュアルを生成しています。完了後に操作できます。'
     : error === 'invalid-program' ? '未入力の項目、分岐先、到達不能なブロックや循環を確認してください。'
     : error === 'program-evidence' ? '操作や作業権限の根拠が不足しています。内容を編集し、未確認として保存してから確認してください。'
     : error === 'review-permissions' ? '内容と必要な作業権限を確認してから承認してください。'
@@ -164,7 +165,7 @@ export default function BridgeWork() {
     : error === 'source-missing' ? '参照元の会話がありません。文章を編集して図解を再生成できます。'
     : error === 'conversation-updated' ? t('conversationUpdated') : error === 'voice-error' ? t('voiceError') : error === 'review-steps' ? '確認が必要な手順を編集してから公開してください。'
     : error === 'stale-manual' ? '別の操作で更新されました。画面を更新してから編集してください。'
-    : error === 'login-required' ? 'セッションの有効期限が切れました。ログアウトして再ログインしてください。' : t('error');
+    : error === 'login-required' ? 'セッションの有効期限が切れました。ログアウトして再ログインしてください。' : t('error'));
 
   if (!data) return <main className="login-shell"><section className="login panel flow">
     <Brand/><div className="eyebrow">MULTILINGUAL WORKPLACE SUPPORT</div><h1>職場の「困った」を<br/>みんなの「わかる」に。</h1>

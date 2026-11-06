@@ -38,7 +38,8 @@ export function ManualEditor({manual,busy,save}:{manual:Manual;busy:boolean;save
   const steps=rows.map(row=>row.text);
   const changedSteps=JSON.stringify(steps)!==JSON.stringify(manual.content.steps);
   const disabled=busy||uploading;
-  const canPublish=!disabled && confirmed && !changedSteps && !Boolean(manual.pipeline && ['pending','blocked'].includes(manual.pipeline.verification));
+  const changedContent=changedSteps||title!==manual.content.title||JSON.stringify(cautions)!==JSON.stringify(manual.content.cautions)||JSON.stringify(figures.map(figure=>({id:figure.id,afterStep:figure.anchor==='start'?-1:rows.findIndex(row=>row.id===figure.anchor),url:figure.url,caption:figure.caption})))!==JSON.stringify(manual.figures??[]);
+  const canPublish=!disabled && confirmed && !changedContent && !Boolean(manual.pipeline && ['pending','blocked'].includes(manual.pipeline.verification));
   function move(id:string,target:string) {
     const current=rowRef.current;const from=current.findIndex(row=>row.id===id);const to=current.findIndex(row=>row.id===target);
     if(from<0||to<0||from===to)return;

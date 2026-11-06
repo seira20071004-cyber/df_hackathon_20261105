@@ -63,13 +63,16 @@ export interface Manual {
   updatedAt: string;
   revision?:number;
   approvedAt?:string|null;
-  reviewState?:'awaiting_answers'|'pending_approval'|'held';
+  reviewState?:'awaiting_answers'|'pending_approval'|'held'|'rejected';
+  publishedSnapshot?:Manual;
+  publicationSuppressed?:boolean;
+  security?:{contentHash:string;inspection:import('./security-content').Inspection;checkedAt:string};
   program?:ManualProgram;
   programTranslations?:Partial<Record<Language,ManualProgram>>;
   extraction?:ExtractedChat;
   clarification?:{round:number;questions:GapQuestion[];previousQuestions:GapQuestion[];answers:AdditionalAnswer[]};
   quality?:{report?:QualityReport;issues:string[];repairs:number};
-  audit?:{revision:number;at:string;actor:string;action:'generated'|'edited'|'published'|'unpublished'|'held';changes:string[]}[];
+  audit?:{revision:number;at:string;actor:string;action:'generated'|'edited'|'published'|'unpublished'|'held'|'rejected';changes:string[]}[];
   embedding?:{model:string;hash:string;values:number[]};
   generation?: {
     state: 'queued' | 'analyzing' | 'checking_gaps' | 'writing' | 'validating' | 'illustrating' | 'awaiting_answers' | 'held' | 'ready' | 'failed';

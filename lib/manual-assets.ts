@@ -6,14 +6,16 @@ export const figureSchema=z.object({id:z.uuid(),afterStep:z.number().int().min(-
   url:z.string().max(180_000).regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/),caption:z.string().trim().max(200)});
 export async function normalizeFigures(figures:z.infer<typeof figureSchema>[], stepCount:number) {
   if(new Set(figures.map(figure=>figure.id)).size!==figures.length || figures.some(figure=>figure.afterStep>=stepCount)) throw new Error('invalid-figures');
-  const normalized=await Promise.all(figures.map(async figure=>{
+  const normalized=[];
+  for(const figure of figures){
     const source=Buffer.from(figure.url.split(',')[1],'base64');
     const image=sharp(source,{limitInputPixels:16_000_000,animated:false});
     const metadata=await image.metadata();
     if(!['jpeg','png','webp'].includes(metadata.format ?? ''))throw new Error('invalid-figures');
+    if(!figure.url.startsWith('data:image/'+metadata.format+';')||(metadata.pages??1)>1)throw new Error('invalid-figures');
     const bytes=await image.rotate().resize({width:1200,height:1000,fit:'inside',withoutEnlargement:true}).webp({quality:78}).toBuffer();
-    return {...figure,url:'data:image/webp;base64,'+bytes.toString('base64')};
-  }));
+    normalized.push({...figure,url:'data:image/webp;base64,'+bytes.toString('base64')});
+  }
   if(normalized.reduce((sum,figure)=>sum+figure.url.length,0)>280_000) throw new Error('manual-too-large');
   return normalized;
 }

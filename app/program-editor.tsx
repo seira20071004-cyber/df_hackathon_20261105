@@ -8,6 +8,7 @@ export function ProgramEditor({manual,busy,onSave}:{manual:Manual;busy:boolean;o
   const [program,setProgram]=useState<ManualProgram>(()=>structuredClone(manual.program!));
   const [confirmed,setConfirmed]=useState(false),[preview,setPreview]=useState(false),[type,setType]=useState<ManualBlock['type']>('step');
   const parsed=programSchema.safeParse(program),issues=parsed.success?graphIssues(program):['未入力の項目や文字数を確認してください'];
+  const changed=JSON.stringify(program)!==JSON.stringify(manual.program);
   function change(id:string,update:Partial<ManualBlock>){setProgram(current=>({...current,blocks:current.blocks.map(block=>block.id===id?{...block,...update} as ManualBlock:block)}));setConfirmed(false);}
   function target(value:string|null,onChange:(next:string|null)=>void,currentId:string,label='次のブロック'){
     return <label>{label}<select value={value??''} disabled={busy} onChange={event=>onChange(event.target.value||null)}><option value="">管理者へ確認</option>
@@ -55,6 +56,7 @@ export function ProgramEditor({manual,busy,onSave}:{manual:Manual;busy:boolean;o
     {preview&&!issues.length&&<ManualGuide key={JSON.stringify(program)} manual={manual} program={program} language="ja"/>}
     <label className="check"><input type="checkbox" checked={confirmed} disabled={busy} onChange={event=>setConfirmed(event.target.checked)}/>元の会話・追加情報との一致、操作の安全性、必要な作業権限を管理者として確認しました</label>
     <div className="actions"><button className="secondary" value="draft" disabled={busy||Boolean(issues.length)}>未確認として保存</button>
-      <button value="publish" disabled={busy||!confirmed||Boolean(issues.length)||manual.reviewState==='awaiting_answers'||Boolean(manual.pipeline&&['pending','blocked'].includes(manual.pipeline.verification))}>承認して公開</button></div>
+      <button value="publish" disabled={busy||changed||!confirmed||Boolean(issues.length)||manual.reviewState==='awaiting_answers'||Boolean(manual.pipeline&&['pending','blocked'].includes(manual.pipeline.verification))}>承認して公開</button></div>
+    {changed&&<p className="muted">変更を未確認として保存してから、その版を確認・承認してください。</p>}
   </form>;
 }

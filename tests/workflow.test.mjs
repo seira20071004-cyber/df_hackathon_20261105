@@ -25,7 +25,7 @@ test('Vietnamese consultation, safe reuse, and publication survive reload', {tim
   const testFolder = await mkdtemp(join(demoFolder,'test-'));
   const port = await availablePort();
   const child = spawn(process.execPath,[join(root,'node_modules','next','dist','bin','next'),'start','-H','127.0.0.1','-p',String(port)],{
-    cwd:root, env:{...process.env, BRIDGE_DEMO:'true', BRIDGE_DEMO_DATA_DIR:testFolder, GEMINI_API_KEY:''}, stdio:['ignore','pipe','pipe']
+    cwd:root, env:{...process.env, BRIDGE_DEMO:'true',BRIDGE_ALLOW_PUBLIC_DEMO:'true',BRIDGE_USER_REQUESTS_PER_MINUTE:'10000',BRIDGE_ORG_REQUESTS_PER_MINUTE:'20000',BRIDGE_AI_CALLS_PER_MINUTE:'10000', BRIDGE_DEMO_DATA_DIR:testFolder, GEMINI_API_KEY:''}, stdio:['ignore','pipe','pipe']
   });
   let log = '';
   child.stdout.on('data', buffer => log += buffer);
@@ -104,7 +104,7 @@ test('Vietnamese consultation, safe reuse, and publication survive reload', {tim
   assert.equal((await api('sato')).questions.find(row => row.id === id).approvedForReuse,true);
   const created = (await api('sato')).manuals.filter(manual => manual.sourceQuestionIds.includes(id));
   assert.equal(created.length,1);
-  const [draft] = created;
+  let [draft] = created;
   assert.equal(draft.status,'draft');
   assert.ok(draft.content.steps.includes(answer));
   assert.deepEqual(draft.content.cautions,[]);
@@ -114,6 +114,8 @@ test('Vietnamese consultation, safe reuse, and publication survive reload', {tim
   const content = {...draft.content,purpose:'清掃の担当範囲を確認する',steps:[answer]};
   const save = {action:'saveManual',id:draft.id,version:draft.updatedAt,content,publish:true};
   await api('linh',save,403);
+  await api('sato',save,400);
+  draft=await api('sato',{...save,publish:false});save.version=draft.updatedAt;
   await api('sato',save);
   await api('sato',save,409);
   const published = (await api('sato')).manuals.find(row => row.id === draft.id);

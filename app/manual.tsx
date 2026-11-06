@@ -78,6 +78,9 @@ export function ManualView({manual, language, onSelectStep,onSelectBlock,onEvent
 }
 
 const errors: Record<string,string> = {
+  'privacy-unavailable':'機密情報の検査を完了できないため、AIへの送信と公開を停止しました。検査サービスの設定を確認してください。',
+  'sensitive-output':'AIの出力に個人情報・秘密情報が含まれる可能性があるため、公開を保留しました。',
+  'rate-limited':'AIの利用回数または同時実行数の上限に達しました。時間をおいて再生成してください。',
   prepay:'Gemini API の前払い残高がありません。AI Studio で残高を追加した後、図解を再生成できます。',
   quota:'画像生成の利用枠が不足しています。課金したプロジェクトのキーと割り当てを確認してから再生成できます。',
   'not-configured':'Gemini キーを設定すると、会話の整理と図解の生成を利用できます。',
@@ -106,7 +109,7 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
   save: (content:ManualContent,publish:boolean,edits?:ManualEdits) => void;
   saveProgram:(program:ManualProgram,publish:boolean,confirmed:boolean)=>void;
   answer:(answers:{questionId:string;answer:string}[])=>void;
-  changeState:(mode:'hold'|'unpublish')=>void;
+  changeState:(mode:'hold'|'unpublish'|'reject')=>void;
   stats?:{uses:number;resolved:number;unresolved:number};
 }) {
   const generating = isGenerating(manual);
@@ -124,7 +127,7 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
   const fallbackReply = sources.flatMap(source=>source.messages).filter(message=>message.role==='manager').at(-1);
   if (!highlighted.size && fallbackReply) highlighted.add(fallbackReply.id);
   const stateLabel = generating ? state === 'illustrating' ? '任意の図解を生成中' : state==='validating' ? '品質と原文との一致を検証中' : state==='checking_gaps'?'重要な不足情報を確認中':state==='analyzing' ? '確定情報と訂正を抽出中' : 'ブロック構成を設計中' :
-    manual.status==='published'?'確認済みのマニュアル':manual.reviewState==='awaiting_answers'?'管理者への追加質問があります':manual.reviewState==='held'?'保留中のマニュアル':state==='failed'?'生成内容の確認が必要です':'承認待ちのマニュアル';
+    manual.status==='published'?'確認済みのマニュアル':manual.reviewState==='awaiting_answers'?'管理者への追加質問があります':manual.reviewState==='rejected'?'却下したマニュアル':manual.reviewState==='held'?'保留中のマニュアル':state==='failed'?'生成内容の確認が必要です':'承認待ちのマニュアル';
   const activeStep=manual.reviewState==='awaiting_answers'?1:generating?(state==='analyzing'||state==='queued'?0:state==='checking_gaps'?1:state==='writing'?2:3):4;
   return <section className="panel flow review-panel">
     <div className="split"><div><div className="eyebrow">MANUAL STUDIO</div><h2>{stateLabel}</h2></div>
@@ -136,6 +139,9 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
       </span>)}
     </div>
     {state === 'failed' && <p className="notice">{errors[manual.generation?.error ?? 'provider-error'] ?? errors['provider-error']}</p>}
+    {manual.publishedSnapshot&&<p className="notice">編集中の変更は未公開です。スタッフには承認済みの版 {manual.publishedSnapshot.revision??1} を表示しています。</p>}
+    {manual.security&&<div className="notice"><strong>機密情報の検査</strong><p>{manual.security.inspection.provider==='google-dlp'?'Google Sensitive Data Protection':'ローカル簡易検査（検出は完全ではありません）'} · {manual.security.inspection.available?'検査済み':'検査を完了できませんでした・公開保留'}</p>
+      {manual.security.inspection.findings.length>0&&<p>要確認：{manual.security.inspection.findings.map(finding=>`${finding.type} (${finding.count})`).join('、')}。実際の値は検査記録に残しません。</p>}</div>}
     {manual.generation && !generating && ['queued','analyzing','checking_gaps','writing','validating','illustrating'].includes(state ?? '') &&
       <p className="notice">生成が中断された可能性があります。再生成して続行できます。</p>}
     {manual.reviewState==='awaiting_answers'&&manual.clarification&&<ClarificationForm key={'clarification-'+manual.id+manual.updatedAt} manual={manual} busy={busy} ai={ai} onAnswer={answer}/>}
@@ -161,6 +167,7 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
       <button className="link" disabled={generating} onClick={() => setEditing(!editing)} aria-expanded={editing}>{editing ? '編集を閉じる' : '編集する'}</button>
       {manual.status==='published'?<button className="secondary" disabled={busy} onClick={()=>changeState('unpublish')}>非公開にする</button>:
         <button className="secondary" disabled={busy||manual.reviewState==='held'} onClick={()=>changeState('hold')}>保留にする</button>}
+      {manual.status!=='published'&&<button className="secondary" disabled={busy||generating||manual.reviewState==='rejected'} onClick={()=>changeState('reject')}>却下する</button>}
     </div>
     <div className="manual-review-columns">
       <section className="review-conversation">

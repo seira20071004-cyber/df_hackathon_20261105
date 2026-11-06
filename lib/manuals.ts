@@ -3,9 +3,16 @@ import type {Manual,Profile,Question} from './model';
 import {mutate} from './storage';
 import {generationContext,INTERACTIVE_PROMPT_VERSION,runInteractiveGeneration} from './interactive-generation';
 import {programContent} from './manual-graph';
+import {protectAiData,publicationInspection,safeToPublish} from './privacy';
+import {digest} from './security-content';
+import {publicationHash,publicationPayload} from './publication';
+import {audit,securityContext} from './security-runtime';
 
 export const generationRunning=(manual:Manual)=>Boolean(manual.generation&&['queued','analyzing','checking_gaps','writing','validating','illustrating'].includes(manual.generation.state)&&Date.now()-Date.parse(manual.generation.startedAt)<300_000);
 export async function buildManual(profile:Profile,draft:Manual,question:Question|undefined,imagesOnly:boolean){
+  return securityContext.run(profile,()=>buildProtectedManual(profile,draft,question,imagesOnly));
+}
+async function buildProtectedManual(profile:Profile,draft:Manual,question:Question|undefined,imagesOnly:boolean){
   const attemptId=draft.generation?.attemptId;if(!attemptId)return;
   async function update(change:Partial<Manual>){return mutate(profile,draft.siteId,'manuals',draft.id,current=>{
     if(!current)throw new Error('source-missing');
@@ -19,7 +26,7 @@ export async function buildManual(profile:Profile,draft:Manual,question:Question
       await update({imageUrls:image.images,imageLayout:'steps',reviewState:'pending_approval',generation:status(image.images.length===draft.content.steps.length?'ready':'failed',image.error),updatedAt:new Date().toISOString()});return;
     }
     if(!question)throw new Error('source-missing');
-    const answers=draft.clarification?.answers??[],{context,hash,bytes}=generationContext(profile,question,answers);
+    const answers=draft.clarification?.answers??[],raw=generationContext(profile,question,answers),context=await protectAiData(raw.context),hash=digest(context),bytes=Buffer.byteLength(JSON.stringify(context));
     let pipeline:NonNullable<Manual['pipeline']>={promptVersion:INTERACTIVE_PROMPT_VERSION,contextHash:hash,contextBytes:bytes,messageCount:context.sources.length,
       provider:process.env.GEMINI_PROVIDER==='vertex'?'vertex':'developer',model:process.env.GEMINI_MODEL||'gemini-2.5-flash',verification:'pending',issues:[],factCount:0,supersededCount:0};
     await update({pipeline});
@@ -47,13 +54,18 @@ export async function buildManual(profile:Profile,draft:Manual,question:Question
       const image=await illustrate(content.steps);imageUrls=image.images;imageError=image.error;
     }
     const at=new Date().toISOString(),revision=(draft.revision??1)+1;
+    const candidate={...draft,program,content,translations:{},programTranslations:{},imageUrls,languages:['ja'] as Manual['languages']};
+    const inspection=await publicationInspection(publicationPayload(candidate));
+    if(!safeToPublish(inspection)){await update({...common,program,content,imageUrls,reviewState:'held',security:{inspection,contentHash:publicationHash(candidate),checkedAt:at},generation:status('held','privacy-review'),updatedAt:at});return;}
     await update({...common,program,content,evidence,programTranslations:{},translations:{},languages:['ja'],imageUrls,imageLayout:'steps',reviewState:'pending_approval',revision,
-      clarification:{round:draft.clarification?.round??0,questions:[],previousQuestions:draft.clarification?.previousQuestions??[],answers},
+      security:{inspection,contentHash:publicationHash(candidate),checkedAt:at},clarification:{round:draft.clarification?.round??0,questions:[],previousQuestions:draft.clarification?.previousQuestions??[],answers},
       audit:[...(draft.audit??[]),{revision,at,actor:'Gemini',action:'generated' as const,changes:['対話型マニュアルを構成・検証']}].slice(-30),
       generation:status(imageError?'failed':'ready',imageError),updatedAt:at});
+    await audit({actorId:profile.id,organizationId:profile.organizationId,action:'manual_generated',result:'success',resourceId:draft.id});
   }catch(error){
     const message=error instanceof Error?error.message:'provider-error';if(message==='obsolete-attempt')return;
-    const code=['context-limit','context-scope','source-not-resolved','source-missing','not-configured','quota','prepay','access-denied','generation-timeout','invalid-json'].includes(message)?message:'provider-error';
+    const code=['context-limit','context-scope','source-not-resolved','source-missing','not-configured','quota','prepay','access-denied','generation-timeout','invalid-json','privacy-unavailable','sensitive-output','rate-limited'].includes(message)?message:'provider-error';
     await update({reviewState:'held',generation:status('failed',code),updatedAt:new Date().toISOString()}).catch(()=>undefined);
+    await audit({actorId:profile.id,organizationId:profile.organizationId,action:'manual_generation',result:'failed',code,resourceId:draft.id}).catch(()=>undefined);
   }
 }

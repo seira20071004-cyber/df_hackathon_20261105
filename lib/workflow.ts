@@ -6,6 +6,8 @@ import { buildManual, generationRunning } from './manuals';
 import { figureSchema, normalizeFigures, reorderedAssets } from './manual-assets';
 import {CONTACT_TEXT,blockText,graphIssues,graphShape,programContent,programSchema,validRunPath} from './manual-graph';
 import {generationContext} from './interactive-generation';
+import {publicationHash,publicationPayload,releasedManual,publicManual} from './publication';
+import {publicationInspection,safeToPublish} from './privacy';
 import {cosine,semanticHash,semanticText} from './semantic-search';
 import { isScoped, languageNames, languages, mayReadManual, mayReadQuestion, mayReuse, topic, type Language, type Manual, type Match, type Profile, type Question } from './model';
 import { deliverManual, isDemo, list, mutate,recordManualSession, resolveWithManual, setLanguage, slug, staffRecipients } from './storage';
@@ -24,7 +26,7 @@ export const actionSchema = z.discriminatedUnion('action', [
   z.object({action: z.literal('viewManual'), ...record, version: z.string().max(40)}),
   z.object({action:z.literal('sendManual'),...record,version:z.string().max(40),employeeIds:z.array(slug).min(1).max(50)}),
   z.object({action:z.literal('answerManual'),...record,version:z.string().max(40),answers:z.array(z.object({questionId:z.string().max(80),answer:text})).min(1).max(3)}),
-  z.object({action:z.literal('manualState'),...record,version:z.string().max(40),mode:z.enum(['hold','unpublish'])}),
+  z.object({action:z.literal('manualState'),...record,version:z.string().max(40),mode:z.enum(['hold','unpublish','reject'])}),
   z.object({action:z.literal('saveProgram'),...record,version:z.string().max(40),program:programSchema,publish:z.boolean(),confirmPermissions:z.boolean().default(false)}),
   z.object({action:z.literal('manualSession'),...record,version:z.string().max(40),runId:z.uuid(),event:z.enum(['start','resolved','unresolved']),
     path:z.array(z.string().max(80)).max(24),text:z.string().max(3000).optional(),language:z.enum(languages)}),
@@ -44,7 +46,8 @@ function assertRole(profile: Profile, role: Profile['role']) {
 }
 async function loadSite(profile: Profile, siteId: string) {
   const [questions, manuals] = await Promise.all([list(profile, siteId, 'questions'), list(profile, siteId, 'manuals')]);
-  return {questions: newest(questions.filter(row => isScoped(profile, row))), manuals: newest(manuals.filter(row => isScoped(profile, row)))};
+  const scoped=manuals.filter(row=>isScoped(profile,row));
+  return {questions: newest(questions.filter(row => isScoped(profile, row))), manuals: newest(profile.role==='manager'?scoped:scoped.flatMap(row=>{const released=releasedManual(row);return released?[released]:[];}))};
 }
 export async function workspace(profile: Profile) {
   const sites = await Promise.all(profile.siteIds.map(async siteId => {
@@ -68,9 +71,9 @@ export async function workspace(profile: Profile) {
     questions: newest(sites.flatMap(site => site.questions.filter(row => mayReadQuestion(profile,row)))),
     manuals: newest(sites.flatMap(site => site.manuals.filter(row => mayReadManual(profile,row))))};
 }
-function staffManual({evidence,pipeline,clarification,extraction,quality,audit,embedding,...manual}:Manual){return manual;}
+const staffManual=publicManual;
 function candidates(questions: Question[], manuals: Manual[]): Match[] {
-  const published = manuals.filter(manual => manual.status === 'published');
+  const published = manuals.flatMap(manual=>{const released=releasedManual(manual);return released?[released]:[];});
   return [
     ...questions.filter(mayReuse).map(question => ({
       id: question.id, kind: 'question' as const, siteId: question.siteId,
@@ -177,6 +180,8 @@ export async function execute(profile: Profile, input: Action) {
     return staffManual(manual);
   }
   if (input.action === 'search') {
+    const publicCandidates=manuals.flatMap(row=>{const released=releasedManual(row);return released?[released]:[];});
+    manuals.splice(0,manuals.length,...publicCandidates);
     const matches = candidates([], manuals);
     const localizedTitles = new Map(manuals.map(manual => [manual.id, manual.translations[input.language]?.title ?? '']));
     const ranked = matches.map(match => ({match, score: Math.max(relevance(input.text, match.title),
@@ -243,9 +248,9 @@ export async function execute(profile: Profile, input: Action) {
   if(input.action==='manualState')return mutate(profile,siteId,'manuals',input.id,manual=>{
     if(!manual||manual.updatedAt!==input.version)throw new ApiError(409,'stale-manual');
     const at=date(),revision=(manual.revision??1)+1;
-    return {...manual,status:'draft',approvedBy:null,approvedAt:null,reviewState:input.mode==='hold'?'held':'pending_approval',revision,updatedAt:at,
+    return {...manual,status:'draft',approvedBy:null,approvedAt:null,publicationSuppressed:input.mode==='unpublish',reviewState:input.mode==='hold'?'held':input.mode==='reject'?'rejected':'pending_approval',revision,updatedAt:at,
       generation:{state:input.mode==='hold'?'held':'ready',attemptId:randomUUID(),startedAt:at},
-      audit:[...(manual.audit??[]),{revision,at,actor:profile.name,action:input.mode==='hold'?'held' as const:'unpublished' as const,changes:[input.mode==='hold'?'管理者が保留':'公開を取り消しました']}].slice(-30)};
+      audit:[...(manual.audit??[]),{revision,at,actor:profile.id,action:input.mode==='hold'?'held' as const:input.mode==='reject'?'rejected' as const:'unpublished' as const,changes:[input.mode==='hold'?'管理者が保留':input.mode==='reject'?'管理者が却下':'公開を取り消しました']}].slice(-30)};
   });
   if(input.action==='answerManual'){
     if(!aiConfigured())throw new ApiError(503,'ai-not-configured');
@@ -267,6 +272,7 @@ export async function execute(profile: Profile, input: Action) {
     if(input.publish&&!input.confirmPermissions)throw new ApiError(400,'review-permissions');
     const source=questions.find(row=>previous.sourceQuestionIds.includes(row.id));if(!source)throw new ApiError(400,'source-missing');
     const changed=JSON.stringify(previous.program)!==JSON.stringify(input.program);
+    if(input.publish&&changed)throw new ApiError(400,'save-before-approve');
     if(input.publish&&previous.reviewState==='awaiting_answers')throw new ApiError(400,'answer-required');
     if(input.publish&&previous.pipeline&&['pending','blocked'].includes(previous.pipeline.verification))throw new ApiError(400,'review-evidence');
     const answers=[...(previous.clarification?.answers??[])];
@@ -296,18 +302,21 @@ export async function execute(profile: Profile, input: Action) {
       }
     }));}
     const content=programContent(program),candidate={...previous,program,content};
+    const inspection=await publicationInspection(publicationPayload({...candidate,translations,programTranslations,languages:['ja',...Object.keys(programTranslations) as Language[]]}));
+    if(input.publish&&!safeToPublish(inspection))throw new ApiError(400,'privacy-review');
     const values=input.publish?await embedding(semanticText(candidate),'RETRIEVAL_DOCUMENT'):null;
     return mutate(profile,siteId,'manuals',input.id,manual=>{
       if(!manual||manual.updatedAt!==input.version)throw new ApiError(409,'stale-manual');if(generationRunning(manual))throw new ApiError(409,'generation-running');
       const at=date(),revision=(manual.revision??1)+1,sameSteps=JSON.stringify(content.steps)===JSON.stringify(manual.content.steps);
       const next:Manual={...manual,program,content,translations,programTranslations,languages:['ja',...Object.keys(programTranslations) as Language[]],
-        status:input.publish?'published':'draft',approvedBy:input.publish?profile.id:null,approvedAt:input.publish?at:null,updatedAt:at,revision,reviewState:'pending_approval',
+          status:input.publish?'published':'draft',approvedBy:input.publish?profile.id:null,approvedAt:input.publish?at:null,updatedAt:at,revision,reviewState:safeToPublish(inspection)?'pending_approval':'held',publicationSuppressed:false,
         generation:{state:'ready',attemptId:randomUUID(),startedAt:at},
         clarification:{round:manual.clarification?.round??0,questions:[],previousQuestions:manual.clarification?.previousQuestions??[],answers},
         imageUrls:sameSteps?manual.imageUrls:[],figures:sameSteps?manual.figures??[]:[],
         ...(manual.pipeline&&changed?{pipeline:{...manual.pipeline,verification:'edited' as const,issues:[]}}:{}),
-        audit:[...(manual.audit??[]),{revision,at,actor:profile.name,action:input.publish?'published' as const:'edited' as const,changes:changed?['ブロック構成・内容を編集']:['公開状態を確認']}].slice(-30)};
-      if(values)next.embedding={model:process.env.GEMINI_EMBEDDING_MODEL!,hash:semanticHash(candidate),values};else delete next.embedding;
+        audit:[...(manual.audit??[]),{revision,at,actor:profile.id,action:input.publish?'published' as const:'edited' as const,changes:changed?['ブロック構成・内容を編集']:['公開状態を確認']}].slice(-30)};
+        next.security={inspection,contentHash:publicationHash(next),checkedAt:at};
+        if(values)next.embedding={model:process.env.GEMINI_EMBEDDING_MODEL!,hash:semanticHash(candidate),values};else delete next.embedding;
       if(Buffer.byteLength(JSON.stringify(next))>950_000)throw new ApiError(400,'manual-too-large');return next;
     });
   }
@@ -332,28 +341,32 @@ export async function execute(profile: Profile, input: Action) {
   const translations: Manual['translations'] = {};
   const sameSteps = JSON.stringify(previous.content.steps) === JSON.stringify(input.content.steps);
   const sameContent = JSON.stringify(previous.content) === JSON.stringify(input.content);
+  if(input.publish&&!sameContent)throw new ApiError(400,'save-before-approve');
   let assets:ReturnType<typeof reorderedAssets>;
   let figures=previous.figures ?? [];
   try {
     assets=reorderedAssets(previous,input.content,input.stepSources);
-    if(input.figures) figures=await normalizeFigures(input.figures,input.content.steps.length);
+    if(input.publish&&input.figures&&JSON.stringify(input.figures)!==JSON.stringify(previous.figures??[]))throw new ApiError(400,'save-before-approve');
+    if(input.figures&&!input.publish) figures=await normalizeFigures(input.figures,input.content.steps.length);
     else if(!sameSteps) figures=[];
-  } catch(error) {throw new ApiError(400,error instanceof Error && error.message==='manual-too-large'?'manual-too-large':'invalid-figures');}
+  } catch(error) {if(error instanceof ApiError)throw error;throw new ApiError(400,error instanceof Error && error.message==='manual-too-large'?'manual-too-large':'invalid-figures');}
   if(input.publish && previous.pipeline && ['pending','blocked'].includes(previous.pipeline.verification)) throw new ApiError(400,'review-evidence');
   if (input.publish && !sameSteps) throw new ApiError(400, 'review-images');
   if (input.publish) {
     await Promise.all((['en','vi'] as const).map(async language => {
       const translation = await generate(manualContent, '元の構造と作業指示を変えずに翻訳してください。追加や省略は禁止です。', {language: languageNames[language], manual: input.content});
-      if (translation) translations[language] = translation;
+      if (translation) {const checked=await generate(z.object({preserved:z.boolean()}),'元のマニュアルと翻訳の操作、条件、数量、否定、注意事項が追加・削除・変更されていない場合だけpreserved=true。',{original:input.content,translation});if(checked?.preserved)translations[language]=translation;}
     }));
   }
+  const inspection=await publicationInspection(publicationPayload({...previous,content:input.content,translations,figures,imageUrls:assets.images}));
+  if(input.publish&&!safeToPublish(inspection))throw new ApiError(400,'privacy-review');
   return mutate(profile, siteId, 'manuals', input.id, manual => {
     if (!manual || !isScoped(profile, manual)) throw new ApiError(404, 'not-found');
     if (manual.updatedAt !== input.version) throw new ApiError(409, 'stale-manual');
     if (generationRunning(manual)) throw new ApiError(409, 'generation-running');
     const revision=(manual.revision??1)+1,at=date();
-    const next: Manual = {...manual, content: input.content, translations, imageUrls: assets.images, figures,revision,reviewState:'pending_approval',
-      approvedAt:input.publish?at:null,audit:[...(manual.audit??[]),{revision,at,actor:profile.name,action:input.publish?'published' as const:'edited' as const,changes:['本文・図・公開状態']}].slice(-30),
+    const next: Manual = {...manual, content: input.content, translations, imageUrls: assets.images, figures,revision,publicationSuppressed:false,reviewState:safeToPublish(inspection)?'pending_approval':'held',
+      approvedAt:input.publish?at:null,audit:[...(manual.audit??[]),{revision,at,actor:profile.id,action:input.publish?'published' as const:'edited' as const,changes:['本文・図・公開状態']}].slice(-30),
       ...(sameSteps ? {} : {imageLayout: 'steps' as const}),
       evidence: sameContent ? manual.evidence ?? {steps: [], cautions: []} :
         {steps:assets.evidence,cautions:JSON.stringify(manual.content.cautions)===JSON.stringify(input.content.cautions)?manual.evidence?.cautions ?? []:[]},
@@ -362,6 +375,7 @@ export async function execute(profile: Profile, input: Action) {
         {state:'failed', error:'content-changed', attemptId:randomUUID(), startedAt:date()},
       languages: ['ja', ...Object.keys(translations) as Language[]],
       status: input.publish ? 'published' : 'draft', approvedBy: input.publish ? profile.id : null, updatedAt: date()};
+    next.security={inspection,contentHash:publicationHash(next),checkedAt:at};
     if(Buffer.byteLength(JSON.stringify(next))>950_000)throw new ApiError(400,'manual-too-large');
     return next;
   });

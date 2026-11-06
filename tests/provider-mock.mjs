@@ -18,6 +18,7 @@ globalThis.fetch = async (url,options) => {
   const schema=request.generationConfig?.responseJsonSchema;
   const input=JSON.parse(request.contents[0].parts[0].text);
   const context=input.context??input;
+  if(context.question?.includes('APIタイムアウト'))throw new DOMException('mock deadline','TimeoutError');
   if(context.question?.includes('API障害'))return Response.json({error:{code:503,message:'mock unavailable',status:'UNAVAILABLE'}},{status:503});
   if(context.question?.includes('利用枠エラー'))return Response.json({error:{code:429,message:'mock quota',status:'RESOURCE_EXHAUSTED'}},{status:429});
   if(context.question?.includes('不正JSON'))return Response.json({candidates:[{content:{parts:[{text:'{"broken":'}]}}]});

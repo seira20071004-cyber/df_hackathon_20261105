@@ -20,6 +20,7 @@ test('inserted pictures are decoded, normalized and bounded to real step locatio
   await assert.rejects(normalizeFigures([{...figure,afterStep:2}],2),/invalid-figures/);
   await assert.rejects(normalizeFigures([figure,figure],2),/invalid-figures/);
   await assert.rejects(normalizeFigures([{...figure,url:'data:image/png;base64,YmFk'}],2));
+  await assert.rejects(normalizeFigures([{...figure,url:figure.url.replace('image/png','image/jpeg')}],2),/invalid-figures/);
   assert.equal(figureSchema.safeParse({...figure,url:'https://example.com/image.jpg'}).success,false);
   assert.equal(figureSchema.safeParse({...figure,url:'data:image/svg+xml;base64,YmFk'}).success,false);
 });

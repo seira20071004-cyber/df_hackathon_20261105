@@ -11,7 +11,7 @@ test('only managers deliver published versions to valid staff, with private idem
   const folder=await mkdtemp(join(root,'.bridge-work','delivery-test-'));
   const socket=createServer();await new Promise(resolve=>socket.listen(0,'127.0.0.1',resolve));const port=socket.address().port;await new Promise(resolve=>socket.close(resolve));
   const child=spawn(process.execPath,[join(root,'node_modules/next/dist/bin/next'),'start','-H','127.0.0.1','-p',String(port)],
-    {cwd:root,env:{...process.env,BRIDGE_DEMO:'true',BRIDGE_DEMO_DATA_DIR:folder,GEMINI_API_KEY:'',GEMINI_PROVIDER:'developer'},stdio:['ignore','pipe','pipe']});
+    {cwd:root,env:{...process.env,BRIDGE_DEMO:'true',BRIDGE_ALLOW_PUBLIC_DEMO:'true',BRIDGE_USER_REQUESTS_PER_MINUTE:'10000',BRIDGE_ORG_REQUESTS_PER_MINUTE:'20000',BRIDGE_AI_CALLS_PER_MINUTE:'10000',BRIDGE_DEMO_DATA_DIR:folder,GEMINI_API_KEY:'',GEMINI_PROVIDER:'developer'},stdio:['ignore','pipe','pipe']});
   let log='';child.stdout.on('data',data=>log+=data);child.stderr.on('data',data=>log+=data);
   t.after(async()=>{if(child.exitCode===null){const stopped=new Promise(resolve=>child.once('exit',resolve));child.kill();await stopped;}await rm(folder,{recursive:true,force:true});});
   const url=`http://127.0.0.1:${port}/api/bridge`;
@@ -38,7 +38,7 @@ test('only managers deliver published versions to valid staff, with private idem
   assert.equal((await api('sato')).deliveries.length,2);assert.equal((await api('linh')).deliveries[0].readAt,null);
   await api('sato',{action:'saveManual',id:manual.id,version:manual.updatedAt,content:manual.content,publish:false});
   manual=(await api('sato')).manuals.find(row=>row.id===manual.id);
-  await api('sato',action(),400);assert.equal((await api('alex')).deliveries.length,0);assert.equal((await api('alex')).manuals.length,0);
+  await api('sato',action(),409);assert.equal((await api('alex')).deliveries.length,1);assert.equal((await api('alex')).manuals.length,1);assert.notEqual((await api('alex')).manuals[0].updatedAt,manual.updatedAt);
   await api('sato',{action:'saveManual',id:manual.id,version:manual.updatedAt,content:manual.content,publish:true});
   manual=(await api('sato')).manuals.find(row=>row.id===manual.id);
   assert.equal((await api('alex')).deliveries.length,0);
