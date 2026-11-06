@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { after } from 'next/server';
 import { z } from 'zod';
-import { generate, illustrate, manualContent, relevance, summarize, translate } from './ai';
+import { generate, manualContent, relevance, summarize, translate } from './ai';
+import { buildManual, generationRunning } from './manuals';
+import { stairRange } from './diagrams';
 import { isScoped, languageNames, languages, mayReadManual, mayReadQuestion, mayReuse, topic, type Language, type Manual, type Match, type Profile, type Question } from './model';
 import { isDemo, list, mutate, resolveWithManual, setLanguage, slug } from './storage';
 
@@ -17,6 +19,7 @@ export const actionSchema = z.discriminatedUnion('action', [
   z.object({action: z.literal('reuse'), ...record, approved: z.boolean()}),
   z.object({action: z.literal('selfResolve'), ...location, text, language: z.enum(languages), matchId: slug, kind: z.enum(['question','manual']), id: z.uuid()}),
   z.object({action: z.literal('viewManual'), ...record, version: z.string().max(40)}),
+  z.object({action: z.literal('regenerateManual'), ...record, version: z.string().max(40), imagesOnly: z.boolean()}),
   z.object({action: z.literal('saveManual'), ...record, content: manualContent, publish: z.boolean(), version: z.string().max(40)})
 ]);
 export type Action = z.infer<typeof actionSchema>;
@@ -42,7 +45,7 @@ export async function workspace(profile: Profile) {
       .flatMap(question => question.references).filter(reference => reference.kind === 'manual' && !reference.version);
     return {...site, manuals: site.manuals.filter(manual => mayReadManual(profile, manual) &&
       (viewed.some(view => view.manualId === manual.id && view.version === manual.updatedAt) ||
-        legacyReferences.some(reference => reference.id === manual.id)))};
+        legacyReferences.some(reference => reference.id === manual.id))).map(({evidence, ...manual}) => manual)};
   }));
   return {profile, demo: isDemo(), ai: Boolean(process.env.GEMINI_API_KEY),
     questions: newest(sites.flatMap(site => site.questions.filter(row => mayReadQuestion(profile,row)))),
@@ -59,7 +62,7 @@ function candidates(questions: Question[], manuals: Manual[]): Match[] {
       manualIds: published.filter(manual => manual.sourceQuestionIds.includes(question.id)).map(manual => manual.id)
     })),
     ...published.map(manual => ({id: manual.id, kind: 'manual' as const, siteId: manual.siteId, title: manual.content.title,
-      answer: manual.content.purpose, resolution: '', manualIds: [manual.id], version: manual.updatedAt}))
+      answer: manual.content.steps.join('\n'), resolution: '', manualIds: [manual.id], version: manual.updatedAt}))
   ];
 }
 function matchKey(match: Match) {return match.kind + '/' + match.id;}
@@ -84,23 +87,9 @@ function createDraft(question: Question): Manual {
   };
   const createdAt = date();
   return {id: randomUUID(), organizationId: question.organizationId, siteId: question.siteId, content, translations: {},
-    languages: ['ja'], sourceQuestionIds: [question.id], status: 'draft', approvedBy: null, imageUrls: [], createdAt, updatedAt: createdAt};
-}
-async function enrichDraft(profile: Profile, draft: Manual, question: Question) {
-  const title = draft.content.title;
-  const extracted = await generate(manualContent.pick({title: true, steps: true, cautions: true}),
-    '相談の会話から質問内容(title)、対処法(steps)、注意事項(cautions)だけを日本語で抽出してください。挨拶、重複、推測、個人情報は除き、質問に答えるための確認できた手順だけを整理してください。会話に明記された注意事項だけを記載し、なければ cautions は空配列にしてください。対処法が不明なら steps は「管理者による確認が必要」の1項目にしてください。',
-    {question: title, conversation: question.messages.map(message => ({
-      role: message.role, text: message.role === 'employee' ? message.translatedText || message.originalText : message.originalText
-    })), resolution: question.resolution});
-  const content = {...draft.content, ...extracted};
-  const imageUrls = content.steps.includes(needsReview) ? [] : await illustrate(content.steps);
-  if (!extracted && !imageUrls.length) return;
-  await mutate(profile, draft.siteId, 'manuals', draft.id, current => {
-    if (!current) throw new ApiError(404, 'not-found');
-    if (current.status !== 'draft' || current.updatedAt !== draft.updatedAt) return current;
-    return {...current, content, imageUrls, updatedAt: date()};
-  });
+    languages: ['ja'], sourceQuestionIds: [question.id], status: 'draft', approvedBy: null, imageUrls: [], createdAt, updatedAt: createdAt,
+    generation: {state: process.env.GEMINI_API_KEY ? 'queued' : 'failed', attemptId: randomUUID(), startedAt: createdAt,
+      ...(!process.env.GEMINI_API_KEY ? {error:'not-configured'} : {})}};
 }
 export async function execute(profile: Profile, input: Action) {
   if (input.action === 'language') {
@@ -139,7 +128,8 @@ export async function execute(profile: Profile, input: Action) {
     await mutate(profile, siteId, 'manualViews', id, () => ({
       id, employeeId: profile.id, organizationId: profile.organizationId, siteId, manualId: manual.id, version: manual.updatedAt
     }));
-    return manual;
+    const {evidence, ...viewable} = manual;
+    return viewable;
   }
   if (input.action === 'search') {
     const matches = candidates([], manuals);
@@ -176,7 +166,7 @@ export async function execute(profile: Profile, input: Action) {
         return {...question, status: 'resolved', resolvedAt: date(), resolution};
       });
       if (result.created && process.env.GEMINI_API_KEY) {
-        after(() => enrichDraft(profile, manual, result.question));
+        after(() => buildManual(profile, manual, result.question, false));
       }
       return result.question;
     }
@@ -201,22 +191,44 @@ export async function execute(profile: Profile, input: Action) {
   assertRole(profile, 'manager');
   const previous = manuals.find(manual => manual.id === input.id);
   if (!previous) throw new ApiError(404, 'not-found');
+  if (input.action === 'regenerateManual') {
+    if (!process.env.GEMINI_API_KEY) throw new ApiError(503, 'ai-not-configured');
+    const question = questions.find(row => previous.sourceQuestionIds.includes(row.id));
+    if (!input.imagesOnly && !question) throw new ApiError(400, 'source-missing');
+    const draft = await mutate(profile, siteId, 'manuals', input.id, manual => {
+      if (!manual || !isScoped(profile, manual)) throw new ApiError(404, 'not-found');
+      if (manual.updatedAt !== input.version) throw new ApiError(409, 'stale-manual');
+      if (generationRunning(manual)) throw new ApiError(409, 'generation-running');
+      return {...manual, status: 'draft', approvedBy: null, translations: {}, languages: ['ja'], updatedAt: date(),
+        generation: {state: 'queued', startedAt: date(), attemptId: randomUUID()}};
+    });
+    after(() => buildManual(profile, draft, question, input.imagesOnly));
+    return draft;
+  }
   if (input.publish && input.content.steps.includes('管理者による確認が必要')) throw new ApiError(400, 'review-steps');
+  if (generationRunning(previous)) throw new ApiError(409, 'generation-running');
   const translations: Manual['translations'] = {};
   const sameSteps = JSON.stringify(previous.content.steps) === JSON.stringify(input.content.steps);
-  const illustration = sameSteps && previous.imageUrls.length ? Promise.resolve(previous.imageUrls) :
-    input.content.steps.includes('管理者による確認が必要') ? Promise.resolve([]) : illustrate(input.content.steps);
+  const sameContent = JSON.stringify(previous.content) === JSON.stringify(input.content);
+  const rangeDiagram = stairRange(input.content.steps.join(' '));
+  if (input.publish && process.env.GEMINI_API_KEY && (!sameSteps || (!previous.imageUrls.length && !rangeDiagram))) throw new ApiError(400, 'review-images');
   if (input.publish) {
     await Promise.all((['en','vi'] as const).map(async language => {
       const translation = await generate(manualContent, '元の構造と作業指示を変えずに翻訳してください。追加や省略は禁止です。', {language: languageNames[language], manual: input.content});
       if (translation) translations[language] = translation;
     }));
   }
-  const imageUrls = await illustration;
   return mutate(profile, siteId, 'manuals', input.id, manual => {
     if (!manual || !isScoped(profile, manual)) throw new ApiError(404, 'not-found');
     if (manual.updatedAt !== input.version) throw new ApiError(409, 'stale-manual');
-    return {...manual, content: input.content, translations, imageUrls, languages: ['ja', ...Object.keys(translations) as Language[]],
+    if (generationRunning(manual)) throw new ApiError(409, 'generation-running');
+    const next: Manual = {...manual, content: input.content, translations, imageUrls: sameSteps ? manual.imageUrls : [],
+      ...(sameSteps ? {} : {imageLayout: 'steps' as const}),
+      evidence: sameContent ? manual.evidence ?? {steps: [], cautions: []} : {steps: [], cautions: []},
+      generation: sameSteps ? manual.generation ?? {state:'ready', attemptId:randomUUID(), startedAt:date()} :
+        {state:'failed', error:'content-changed', attemptId:randomUUID(), startedAt:date()},
+      languages: ['ja', ...Object.keys(translations) as Language[]],
       status: input.publish ? 'published' : 'draft', approvedBy: input.publish ? profile.id : null, updatedAt: date()};
+    return next;
   });
 }

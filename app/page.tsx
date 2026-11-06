@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { copy } from '../lib/copy';
-import { languageNames, languages, type Language, type Manual, type ManualContent, type Match, type Question, type Workspace } from '../lib/model';
+import { ManualReview, ManualView, isGenerating } from './manual';
+import { languageNames, languages, type Language, type Manual, type Match, type Question, type Workspace } from '../lib/model';
 
 type Tab = 'home' | 'cases' | 'manuals';
-const manualFields = ['title','steps','cautions'] as const;
+
 const glyphs = {home:'⌂', cases:'◫', manuals:'▤'};
 const focusSearchResults = (heading: HTMLHeadingElement | null) => heading?.focus();
 const siteName = (id: string) => id === 'sakura' ? 'Sakura Building' : id;
@@ -27,39 +28,6 @@ function Brand() {
 function Badge({children, variant = ''}: {children: ReactNode; variant?: string}) {
   return <span className={'badge ' + variant}>{children}</span>;
 }
-function ManualView({manual, language}: {manual: Manual; language: Language}) {
-  const content = manual.translations[language] ?? manual.content;
-  const t = (key: Parameters<typeof copy>[1]) => copy(language, key);
-  return <article className="panel manual">
-    <div className="eyebrow">{t('manualQuestion')}</div><h2>{content.title}</h2>
-    {language !== 'ja' && !manual.translations[language] && <p className="muted">{t('onlyJapanese')}</p>}
-    <h3>{t('procedure')}</h3>
-    <ol className="steps">{content.steps.map((step,index) => <li key={index}><span>{String(index + 1).padStart(2,'0')}</span>{step}</li>)}</ol>
-    {manual.imageUrls.map(url => <img className="procedure-image" key={url} src={url} alt={t('procedureImage')} loading="lazy"/>)}
-    {content.cautions.length > 0 && <section><h3>{t('cautions')}</h3><ul>{content.cautions.map((line,index) => <li key={index}>{line}</li>)}</ul></section>}
-  </article>;
-}
-function Editor({manual, busy, save}: {manual: Manual; busy: boolean; save: (content: ManualContent,publish:boolean) => void}) {
-  const [fields, setFields] = useState(() => Object.fromEntries(manualFields.map(key => [key, Array.isArray(manual.content[key]) ? manual.content[key].join('\n') : manual.content[key]])) as Record<typeof manualFields[number],string>);
-  const [confirmed, setConfirmed] = useState(false);
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const publish = (event.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'publish';
-    if (publish && !confirmed) return;
-    const lines = (key: keyof typeof fields) => fields[key].split('\n').map(value => value.trim()).filter(Boolean);
-    save({...manual.content, title: fields.title, steps: lines('steps'), cautions: lines('cautions')}, publish);
-  }
-  return <form className="panel flow" onSubmit={submit}>
-    <h2>マニュアルを確認・編集</h2><p className="muted">リストは1項目ずつ改行してください。現場の条件と安全に関わる指示を確認してください。</p>
-    {manualFields.map(key => <label key={key}>{copy('ja', key === 'title' ? 'manualQuestion' : key === 'steps' ? 'procedure' : 'cautions')}
-      {key === 'title' ? <input required maxLength={500} value={fields[key]} onChange={event => {setConfirmed(false); setFields({...fields,[key]:event.target.value});}} /> :
-        <textarea rows={3} required={key === 'steps'} maxLength={6000} value={fields[key]} onChange={event => {setConfirmed(false); setFields({...fields,[key]:event.target.value});}} />}
-    </label>)}
-    <label className="check"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} /> 作業条件と手順を確認しました</label>
-    <div className="actions"><button className="secondary" disabled={busy} value="draft">未確認として保存</button><button disabled={busy || !confirmed} value="publish">確認済にする</button></div>
-  </form>;
-}
-
 export default function BridgeWork() {
   const [token,setToken] = useState('');
   const [data,setData] = useState<Workspace>();
@@ -69,6 +37,7 @@ export default function BridgeWork() {
   const [site,setSite] = useState('');
   const [selected,setSelected] = useState('');
   const [manualId,setManualId] = useState('');
+  const [manualStatus,setManualStatus] = useState<Manual['status']>('draft');
   const [query,setQuery] = useState('');
   const [results,setResults] = useState<{matches: Match[]; ai: boolean}>();
   const [message,setMessage] = useState('');
@@ -112,9 +81,9 @@ export default function BridgeWork() {
   useEffect(() => {setVoiceSupported(Boolean(speechRecognition()));}, []);
   useEffect(() => {
     if (!token || busy) return;
-    const timer = setInterval(() => {if (!document.hidden) refresh(token).catch(() => undefined);}, 10000);
+    const timer = setInterval(() => {if (!document.hidden) refresh(token).catch(() => undefined);}, data?.manuals.some(isGenerating) ? 2500 : 10000);
     return () => clearInterval(timer);
-  }, [token,busy,refresh]);
+  }, [token,busy,refresh,data?.manuals]);
 
   async function run(work: () => Promise<void>) {
     setBusy(true); setError('');
@@ -125,7 +94,12 @@ export default function BridgeWork() {
   function openCase(id: string) {
     setSelected(id); setMessage(''); setReuseConfirmed(false); changeTab('cases');
   }
-  function openManual(id: string) {setManualId(id); changeTab('manuals');}
+  function openManual(id: string) {
+    setManualId(id);
+    const next = data?.manuals.find(manual=>manual.id===id);
+    if (next) setManualStatus(next.status);
+    changeTab('manuals');
+  }
   function dictate() {
     const Recognition = speechRecognition();
     if (!Recognition) return;
@@ -148,6 +122,7 @@ export default function BridgeWork() {
   const manuals = data?.manuals.filter(row => row.siteId === site) ?? [];
   const question = questions.find(row => row.id === selected);
   const manual = manuals.find(row => row.id === manualId);
+  const reviewManual = manual?.status === manualStatus ? manual : manuals.find(row=>row.status===manualStatus);
   const send = <T,>(payload: object) => request<T>(token, {siteId:site,...payload});
   function ask(match?: Match) {
     run(async () => {
@@ -157,7 +132,11 @@ export default function BridgeWork() {
       setQuery(''); setResults(undefined); openCase(created.id);
     });
   }
-  const errorText = error === 'conversation-updated' ? t('conversationUpdated') : error === 'voice-error' ? t('voiceError') : error === 'review-steps' ? '確認が必要な手順を編集してから公開してください。'
+  const errorText = error === 'generation-running' ? '現在マニュアルを生成しています。完了後に操作できます。'
+    : error === 'review-images' ? '編集内容を保存し、図解を再生成してから確認済にしてください。'
+    : error === 'ai-not-configured' ? 'Gemini の設定が必要です。'
+    : error === 'source-missing' ? '参照元の会話がありません。文章を編集して図解を再生成できます。'
+    : error === 'conversation-updated' ? t('conversationUpdated') : error === 'voice-error' ? t('voiceError') : error === 'review-steps' ? '確認が必要な手順を編集してから公開してください。'
     : error === 'stale-manual' ? '別の操作で更新されました。画面を更新してから編集してください。'
     : error === 'login-required' ? 'セッションの有効期限が切れました。ログアウトして再ログインしてください。' : t('error');
 
@@ -299,19 +278,39 @@ export default function BridgeWork() {
           </section>}
         </>}
         {tab === 'manuals' && <>
-          {(manager ? ['draft','published'] as const : ['published'] as const).map(status => {
-            const rows = manuals.filter(row => row.status === status);
-            return <section className="panel flow" key={status}>
-              <h2>{manager ? status === 'draft' ? '未確認' : '確認済' : t('manuals')}</h2>
-              {rows.length ? <div className="rows">{rows.map(row => <button className="row" key={row.id} onClick={() => openManual(row.id)}>
+          {manager ? <>
+            <section className="panel flow">
+              <h2>マニュアル確認</h2>
+              <div className="manual-status-tabs" role="tablist" aria-label="確認状態">
+                {(['draft','published'] as const).map(status=><button role="tab" key={status} aria-selected={manualStatus===status}
+                  onClick={()=>{setManualStatus(status);setManualId('');}}>
+                  {status==='draft' ? '未確認' : '確認済'}<span>{manuals.filter(row=>row.status===status).length}</span>
+                </button>)}
+              </div>
+              {reviewManual ? <label className="manual-picker">マニュアルを選択
+                <select value={reviewManual.id} onChange={event=>setManualId(event.target.value)}>
+                  {manuals.filter(row=>row.status===manualStatus).map(row=><option value={row.id} key={row.id}>{row.content.title}{isGenerating(row) ? '（生成中）' : ''}</option>)}
+                </select>
+              </label> : <p className="empty">{t('empty')}</p>}
+            </section>
+            {reviewManual && <ManualReview key={reviewManual.id} manual={reviewManual} questions={questions} busy={busy} ai={data.ai}
+              regenerate={imagesOnly => run(async () => {
+                await send({action:'regenerateManual',id:reviewManual.id,version:reviewManual.updatedAt,imagesOnly});
+                setManualStatus('draft');setManualId(reviewManual.id);await refresh(token);
+              })}
+              save={(content,publish) => run(async () => {
+                await send({action:'saveManual',id:reviewManual.id,version:reviewManual.updatedAt,content,publish});
+                setManualStatus(publish ? 'published' : 'draft');setManualId(reviewManual.id);await refresh(token);
+              })}/>}
+          </> : <>
+            <section className="panel flow">
+              <h2>{t('manuals')}</h2>
+              {manuals.length ? <div className="rows">{manuals.map(row => <button className="row" key={row.id} onClick={() => openManual(row.id)}>
                 <span className="tile">▤</span><span className="row-text"><strong>{(row.translations[language] ?? row.content).title}</strong><small>{siteName(row.siteId)}</small></span>
                 <span>›</span></button>)}</div> : <p className="empty">{t('empty')}</p>}
-            </section>;
-          })}
-          {manual && <ManualView manual={manual} language={language}/>}
-          {manual && manager && <Editor key={manual.id + manual.updatedAt} manual={manual} busy={busy} save={(content,publish) => run(async () => {
-            await send({action:'saveManual',id:manual.id,version:manual.updatedAt,content,publish});await refresh(token);
-          })}/>}
+            </section>
+            {manual && <ManualView manual={manual} language={language}/>}
+          </>}
         </>}
         <footer>Bridge Work <span>·</span> {siteName(site)}</footer>
       </main>

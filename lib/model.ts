@@ -59,6 +59,23 @@ export interface Manual {
   imageUrls: string[];
   createdAt: string;
   updatedAt: string;
+  generation?: {
+    state: 'queued' | 'writing' | 'illustrating' | 'ready' | 'failed';
+    attemptId: string;
+    startedAt: string;
+    error?: string;
+  };
+  evidence?: {
+    steps: {messageId: string; quote: string}[][];
+    cautions: {messageId: string; quote: string}[][];
+  };
+  imageLayout?: 'steps';
+}
+export interface StairRange {
+  kind: 'stair-range';
+  fromFloor: number;
+  toFloor: number;
+  includeLandings: boolean;
 }
 export interface Match {
   id: string;

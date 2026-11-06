@@ -33,6 +33,8 @@ const labels = {
   manualQuestion: ['質問内容','Question','Nội dung câu hỏi'],
   procedure: ['対処法','What to do','Cách xử lý'],
   procedureImage: ['対処法のイラスト','Illustration of the procedure','Hình minh họa cách xử lý'],
+  reviewed: ['確認済','Reviewed','Đã xác nhận'],
+  unreviewed: ['未確認','Awaiting review','Chưa xác nhận'],
   conversationUpdated: ['新しい返信が届きました。相談を更新してから解決してください。','A new reply arrived. Refresh the conversation before marking it resolved.','Có phản hồi mới. Hãy làm mới cuộc trò chuyện trước khi đánh dấu đã giải quyết.'],
   error: ['操作に失敗しました。再度お試しください。','Something went wrong. Please try again.','Có lỗi xảy ra. Vui lòng thử lại.']
 } as const;

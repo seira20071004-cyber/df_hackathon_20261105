@@ -26,10 +26,10 @@ export function seedDemo() {
   const manuals: Manual[] = [{
     ...scope, id: 'sample-manual', sourceQuestionIds: ['sample-0'], status: 'published',
     approvedBy: 'sato', languages: ['ja', 'en', 'vi'], imageUrls: [], createdAt: date, updatedAt: date,
-    content: {title: '階段清掃の範囲', task: '階段清掃', purpose: '清掃の担当範囲を確認する', tools: [], steps: ['1階から3階までの階段を確認する', '各階の踊り場を確認する'], cautions: ['この範囲は架空のデモ現場用です'], mistakes: [], checks: ['階段と踊り場を確認した']},
+    content: {title: '階段はどこまで掃除しますか？', task: '階段清掃', purpose: '清掃の担当範囲を確認する', tools: [], steps: ['1階から3階までの階段が対象です', '各階の踊り場も清掃します'], cautions: [], mistakes: [], checks: ['階段と踊り場を確認した']},
     translations: {
-      en: {title: 'Stair cleaning area', task: 'Stair cleaning', purpose: 'Check your assigned area', tools: [], steps: ['Check stairs from floors 1 to 3', 'Check the landings'], cautions: ['This applies to the fictional demo site'], mistakes: [], checks: ['Stairs and landings checked']},
-      vi: {title: 'Phạm vi vệ sinh cầu thang', task: 'Vệ sinh cầu thang', purpose: 'Xác nhận khu vực được giao', tools: [], steps: ['Kiểm tra cầu thang từ tầng 1 đến tầng 3', 'Kiểm tra các chiếu nghỉ'], cautions: ['Chỉ áp dụng cho địa điểm demo giả định'], mistakes: [], checks: ['Đã kiểm tra cầu thang và chiếu nghỉ']}
+      en: {title: 'Which stairs should I clean?', task: 'Stair cleaning', purpose: 'Check your assigned area', tools: [], steps: ['Clean stairs from floors 1 to 3', 'Include the landings on each floor'], cautions: [], mistakes: [], checks: ['Stairs and landings checked']},
+      vi: {title: 'Tôi cần dọn cầu thang ở những tầng nào?', task: 'Vệ sinh cầu thang', purpose: 'Xác nhận khu vực được giao', tools: [], steps: ['Dọn cầu thang từ tầng 1 đến tầng 3', 'Dọn cả các chiếu nghỉ ở mỗi tầng'], cautions: [], mistakes: [], checks: ['Đã kiểm tra cầu thang và chiếu nghỉ']}
     }
   }];
   return {questions, manuals};
