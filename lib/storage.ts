@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { join } from 'node:path';
@@ -7,7 +7,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore, type CollectionReference } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import { demoProfiles, seedDemo } from './demo';
-import { languages, type Profile, type Question, type Manual, type ManualView } from './model';
+import { languages, type Profile, type Question, type Manual, type ManualView, type ManualDelivery, type StaffRecipient } from './model';
 
 export const isDemo = () => process.env.BRIDGE_DEMO === 'true';
 export const slug = z.string().regex(/^[a-zA-Z0-9_-]{1,120}$/);
@@ -27,7 +27,7 @@ export async function authenticate(token: string): Promise<Profile | null> {
 export async function setLanguage(profile: Profile, preferredLanguage: Profile['preferredLanguage']) {
   if (!isDemo()) await getFirestore(app()).collection('users').doc(profile.id).update({preferredLanguage});
 }
-type Records = {questions: Question; manuals: Manual; manualViews: ManualView};
+type Records = {questions: Question; manuals: Manual; manualViews: ManualView; manualDeliveries:ManualDelivery};
 type Table = keyof Records;
 type DemoState = {[K in Table]: Records[K][]};
 const folder = process.env.BRIDGE_DEMO_DATA_DIR || '.bridge-work';
@@ -35,11 +35,48 @@ const demoFile = join(folder, 'data.json');
 let pending = Promise.resolve();
 async function readDemo(): Promise<DemoState> {
   try {
-    return {manualViews: [], ...JSON.parse(await readFile(demoFile, 'utf8'))};
+    return {manualViews: [], manualDeliveries:[], ...JSON.parse(await readFile(demoFile, 'utf8'))};
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    return {...seedDemo(), manualViews: []};
+    return {...seedDemo(), manualViews: [],manualDeliveries:[]};
   }
+}
+export async function staffRecipients(profile:Profile):Promise<StaffRecipient[]> {
+  if(profile.role!=='manager')return [];
+  const profiles:Profile[]=isDemo()?Object.values(demoProfiles):
+    (await getFirestore(app()).collection('users').where('organizationId','==',profile.organizationId).get()).docs.flatMap(doc=>{
+      const result=profileSchema.safeParse(doc.data());return result.success?[{...result.data,id:doc.id}]:[];
+    });
+  return profiles.filter(row=>row.organizationId===profile.organizationId && row.role==='employee' && row.siteIds.some(site=>profile.siteIds.includes(site)))
+    .map(({id,name,siteIds})=>({id,name,siteIds:siteIds.filter(site=>profile.siteIds.includes(site))})).sort((a,b)=>a.name.localeCompare(b.name));
+}
+
+export async function deliverManual(profile:Profile,siteId:string,manualId:string,version:string,employees:string[]) {
+  if(profile.role!=='manager' || !profile.siteIds.includes(siteId))throw new Error('forbidden');
+  const recipientIds=[...new Set(employees)];
+  const ids=recipientIds.map(employeeId=>createHash('sha256').update(JSON.stringify([profile.organizationId,siteId,manualId,version,employeeId])).digest('hex'));
+  const check=(manual:Manual|undefined,recipients:(Profile|undefined)[])=>{
+    if(!manual || manual.organizationId!==profile.organizationId || manual.siteId!==siteId || manual.status!=='published')throw new Error('manual-not-published');
+    if(manual.updatedAt!==version)throw new Error('stale-manual');
+    if(recipients.some(recipient=>!recipient || recipient.role!=='employee' || recipient.organizationId!==profile.organizationId || !recipient.siteIds.includes(siteId)))throw new Error('invalid-recipient');
+  };
+  const create=(employeeId:string,index:number):ManualDelivery=>({id:ids[index],organizationId:profile.organizationId,siteId,manualId,version,
+    employeeId,sentBy:profile.id,createdAt:new Date().toISOString(),readAt:null});
+  if(isDemo())return mutateDemo(data=>{
+    check(data.manuals.find(row=>row.id===manualId),recipientIds.map(id=>demoProfiles[id]));
+    recipientIds.forEach((employeeId,index)=>{if(!data.manualDeliveries.some(row=>row.id===ids[index]))data.manualDeliveries.push(create(employeeId,index));});
+    return {sent:recipientIds.length};
+  });
+  const manualDoc=collection(profile,siteId,'manuals').doc(manualId);
+  return manualDoc.firestore.runTransaction(async tx=>{
+    const manual=(await tx.get(manualDoc)).data();
+    const users=await tx.getAll(...recipientIds.map(id=>getFirestore(app()).collection('users').doc(id)));
+    check(manual,users.map(doc=>{const result=profileSchema.safeParse(doc.data());return result.success?{...result.data,id:doc.id}:undefined;}));
+    const deliveryDocs=ids.map(id=>collection(profile,siteId,'manualDeliveries').doc(id));
+    const previous=await tx.getAll(...deliveryDocs);
+    recipientIds.forEach((employeeId,index)=>{if(!previous[index].exists)tx.create(deliveryDocs[index],create(employeeId,index));});
+    return {sent:recipientIds.length};
+  });
 }
 function collection<T extends Table>(profile: Profile, siteId: string, table: T) {
   if (!profile.siteIds.includes(siteId)) throw new Error('Forbidden site');

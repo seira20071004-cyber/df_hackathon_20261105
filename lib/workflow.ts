@@ -6,7 +6,7 @@ import { buildManual, generationRunning } from './manuals';
 import { stairRange } from './diagrams';
 import { figureSchema, normalizeFigures, reorderedAssets } from './manual-assets';
 import { isScoped, languageNames, languages, mayReadManual, mayReadQuestion, mayReuse, topic, type Language, type Manual, type Match, type Profile, type Question } from './model';
-import { isDemo, list, mutate, resolveWithManual, setLanguage, slug } from './storage';
+import { deliverManual, isDemo, list, mutate, resolveWithManual, setLanguage, slug, staffRecipients } from './storage';
 
 const text = z.string().trim().min(1).max(3000);
 const location = {siteId: slug};
@@ -20,6 +20,7 @@ export const actionSchema = z.discriminatedUnion('action', [
   z.object({action: z.literal('reuse'), ...record, approved: z.boolean()}),
   z.object({action: z.literal('selfResolve'), ...location, text, language: z.enum(languages), matchId: slug, kind: z.enum(['question','manual']), id: z.uuid()}),
   z.object({action: z.literal('viewManual'), ...record, version: z.string().max(40)}),
+  z.object({action:z.literal('sendManual'),...record,version:z.string().max(40),employeeIds:z.array(slug).min(1).max(50)}),
   z.object({action: z.literal('regenerateManual'), ...record, version: z.string().max(40), imagesOnly: z.boolean()}),
   z.object({action: z.literal('saveManual'), ...record, content: manualContent, publish: z.boolean(), version: z.string().max(40),
     stepSources:z.array(z.number().int().min(-1).max(11)).max(12).optional(), figures:z.array(figureSchema).max(12).optional()})
@@ -41,15 +42,19 @@ async function loadSite(profile: Profile, siteId: string) {
 export async function workspace(profile: Profile) {
   const sites = await Promise.all(profile.siteIds.map(async siteId => {
     const site = await loadSite(profile, siteId);
-    if (profile.role === 'manager') return site;
+    const deliveries=(await list(profile,siteId,'manualDeliveries')).filter(row=>isScoped(profile,row));
+    if (profile.role === 'manager') return {...site,deliveries};
+    const received=deliveries.filter(row=>row.employeeId===profile.id && site.manuals.some(manual=>manual.id===row.manualId && manual.status==='published' && manual.updatedAt===row.version));
     const viewed = (await list(profile, siteId, 'manualViews')).filter(view => isScoped(profile, view) && view.employeeId === profile.id);
     const legacyReferences = site.questions.filter(question => question.employeeId === profile.id)
       .flatMap(question => question.references).filter(reference => reference.kind === 'manual' && !reference.version);
-    return {...site, manuals: site.manuals.filter(manual => mayReadManual(profile, manual) &&
+    return {...site,deliveries:received, manuals: site.manuals.filter(manual => mayReadManual(profile, manual) &&
       (viewed.some(view => view.manualId === manual.id && view.version === manual.updatedAt) ||
+        received.some(delivery=>delivery.manualId===manual.id) ||
         legacyReferences.some(reference => reference.id === manual.id))).map(({evidence, pipeline, ...manual}) => manual)};
   }));
   return {profile, demo: isDemo(), ai: aiConfigured(),
+    staff:await staffRecipients(profile),deliveries:sites.flatMap(site=>site.deliveries).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)),
     questions: newest(sites.flatMap(site => site.questions.filter(row => mayReadQuestion(profile,row)))),
     manuals: newest(sites.flatMap(site => site.manuals.filter(row => mayReadManual(profile,row))))};
 }
@@ -122,6 +127,11 @@ export async function execute(profile: Profile, input: Action) {
     });
   }
   const {questions, manuals} = await loadSite(profile, siteId);
+  if(input.action==='sendManual') {
+    assertRole(profile,'manager');
+    try{return await deliverManual(profile,siteId,input.id,input.version,input.employeeIds);}
+    catch(error){const code=error instanceof Error?error.message:'';if(['manual-not-published','stale-manual','invalid-recipient'].includes(code))throw new ApiError(code==='stale-manual'?409:400,code);throw error;}
+  }
   if (input.action === 'viewManual') {
     assertRole(profile, 'employee');
     const manual = manuals.find(row => row.id === input.id && mayReadManual(profile, row));
@@ -130,6 +140,11 @@ export async function execute(profile: Profile, input: Action) {
     await mutate(profile, siteId, 'manualViews', id, () => ({
       id, employeeId: profile.id, organizationId: profile.organizationId, siteId, manualId: manual.id, version: manual.updatedAt
     }));
+    const deliveries=(await list(profile,siteId,'manualDeliveries')).filter(row=>isScoped(profile,row) && row.employeeId===profile.id && row.manualId===manual.id && row.version===manual.updatedAt);
+    await Promise.all(deliveries.map(delivery=>mutate(profile,siteId,'manualDeliveries',delivery.id,current=>{
+      if(!current || current.employeeId!==profile.id || current.version!==manual.updatedAt)throw new ApiError(404,'not-found');
+      return {...current,readAt:current.readAt || date()};
+    })));
     const {evidence, pipeline, ...viewable} = manual;
     return viewable;
   }

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { copy } from '../lib/copy';
 import { ManualReview, ManualView, isGenerating } from './manual';
+import {ManualInbox,ManualSend} from './manual-delivery';
 import { languageNames, languages, type Language, type Manual, type Match, type Question, type Workspace } from '../lib/model';
 
 type Tab = 'home' | 'cases' | 'manuals';
@@ -123,7 +124,12 @@ export default function BridgeWork() {
   const question = questions.find(row => row.id === selected);
   const manual = manuals.find(row => row.id === manualId);
   const reviewManual = manual?.status === manualStatus ? manual : manuals.find(row=>row.status===manualStatus);
+  const deliveries=data?.deliveries.filter(row=>row.siteId===site) ?? [];
+  const unread=manager?0:deliveries.filter(row=>!row.readAt).length;
   const send = <T,>(payload: object) => request<T>(token, {siteId:site,...payload});
+  function readManual(target:Manual) {
+    run(async()=>{await send({action:'viewManual',id:target.id,version:target.updatedAt});await refresh(token);openManual(target.id);});
+  }
   function ask(match?: Match) {
     run(async () => {
       const created = await send<Question>({action:match ? 'selfResolve' : 'ask', id:crypto.randomUUID(), text:query, language,
@@ -171,7 +177,7 @@ export default function BridgeWork() {
       <Brand/><div className="eyebrow nav-label">{t('workspace')}</div>
       <nav aria-label={t('workspace')}>{(['home','cases','manuals'] as Tab[]).map(item =>
         <button key={item} className={'nav-button ' + (tab === item ? 'current' : '')} aria-current={tab === item ? 'page' : undefined} onClick={() => changeTab(item)}>
-          <span aria-hidden="true">{glyphs[item]}</span>{manager && item === 'home' ? 'ダッシュボード' : t(item)}
+          <span aria-hidden="true">{glyphs[item]}</span>{manager && item === 'home' ? 'ダッシュボード' : t(item)}{item==='manuals'&&unread>0&&<span className="notification-count">{unread}</span>}
         </button>)}</nav>
       <div className="account"><span className="avatar">{data.profile.name.slice(0,1)}</span><div><strong>{data.profile.name}</strong><small>{t(data.profile.role)}</small></div></div>
     </aside>
@@ -198,6 +204,7 @@ export default function BridgeWork() {
         {error && <p className="alert" role="alert">{errorText}</p>}
         {busy && <p className="busy" role="status">{t('searching')}</p>}
         {tab === 'home' && !manager && <>
+          <ManualInbox deliveries={deliveries} manuals={manuals} language={language} busy={busy} onOpen={readManual}/>
           {results && results.matches.length > 0 && <section className="panel flow" aria-labelledby="related-knowledge">
             <h2 id="related-knowledge" tabIndex={-1} ref={focusSearchResults}>{t('similar')}</h2>
             <p className="notice">{t('confirmSite')}</p>{!results.ai && <p className="muted">{t('fallback')}</p>}
@@ -296,6 +303,8 @@ export default function BridgeWork() {
                 </select>
               </label> : <p className="empty">{t('empty')}</p>}
             </section>
+            {reviewManual?.status==='published' && <ManualSend key={reviewManual.id+reviewManual.updatedAt} manual={reviewManual} staff={data.staff} deliveries={deliveries} busy={busy}
+              onSend={async employeeIds=>{await send({action:'sendManual',id:reviewManual.id,version:reviewManual.updatedAt,employeeIds});await refresh(token);}}/>}
             {reviewManual && <ManualReview key={reviewManual.id} manual={reviewManual} questions={questions} busy={busy} ai={data.ai}
               regenerate={imagesOnly => run(async () => {
                 await send({action:'regenerateManual',id:reviewManual.id,version:reviewManual.updatedAt,imagesOnly});
@@ -306,9 +315,10 @@ export default function BridgeWork() {
                 setManualStatus(publish ? 'published' : 'draft');setManualId(reviewManual.id);await refresh(token);
               })}/>}
           </> : <>
+            <ManualInbox deliveries={deliveries} manuals={manuals} language={language} busy={busy} onOpen={readManual}/>
             <section className="panel flow">
-              <h2>{t('manuals')}</h2>
-              {manuals.length ? <div className="rows">{manuals.map(row => <button className="row" key={row.id} onClick={() => openManual(row.id)}>
+              <h2>{{ja:'参照したマニュアル',en:'Guides you have used',vi:'Tài liệu đã tham khảo'}[language]}</h2>
+              {manuals.filter(row=>!deliveries.some(delivery=>delivery.manualId===row.id)).length ? <div className="rows">{manuals.filter(row=>!deliveries.some(delivery=>delivery.manualId===row.id)).map(row => <button className="row" key={row.id} onClick={() => readManual(row)}>
                 <span className="tile">▤</span><span className="row-text"><strong>{(row.translations[language] ?? row.content).title}</strong><small>{siteName(row.siteId)}</small></span>
                 <span>›</span></button>)}</div> : <p className="empty">{t('empty')}</p>}
             </section>

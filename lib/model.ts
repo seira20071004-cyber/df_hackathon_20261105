@@ -112,12 +112,19 @@ export interface ManualView {
   manualId: string;
   version: string;
 }
+export interface ManualDelivery {
+  id:string;organizationId:string;siteId:string;manualId:string;version:string;
+  employeeId:string;sentBy:string;createdAt:string;readAt:string|null;
+}
+export type StaffRecipient=Pick<Profile,'id'|'name'|'siteIds'>;
 export interface Workspace {
   profile: Profile;
   demo: boolean;
   ai: boolean;
   questions: Question[];
   manuals: Manual[];
+  staff:StaffRecipient[];
+  deliveries:ManualDelivery[];
 }
 export const languageNames = {ja: '日本語', en: 'English', vi: 'Tiếng Việt'};
 export const categories = ['階段', '洗剤', 'ごみ', '写真', '汚れ', 'その他'] as const;
