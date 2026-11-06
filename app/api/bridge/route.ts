@@ -26,7 +26,7 @@ async function run(request: NextRequest) {
     if (!profile) return reply({error:'login-required'},401);
     if (request.method === 'GET') return reply(await workspace(profile));
     const raw = await request.text();
-    if (raw.length > 64000) return reply({error:'invalid-input'},413);
+    if (raw.length > 2_400_000) return reply({error:'invalid-input'},413);
     let value: unknown;
     try {value = JSON.parse(raw);} catch {return reply({error:'invalid-input'},400);}
     const input = actionSchema.safeParse(value);

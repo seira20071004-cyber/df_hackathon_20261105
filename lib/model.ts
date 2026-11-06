@@ -70,6 +70,7 @@ export interface Manual {
     cautions: {messageId: string; quote: string}[][];
   };
   imageLayout?: 'steps';
+  figures?: ManualFigure[];
   pipeline?: {
     promptVersion:string;
     contextHash:string;
@@ -85,6 +86,8 @@ export interface Manual {
     verifiedAt?:string;
   };
 }
+export interface ManualFigure {id:string;afterStep:number;url:string;caption:string;}
+export interface ManualEdits {stepSources:number[];figures:ManualFigure[];}
 export interface StairRange {
   kind: 'stair-range';
   fromFloor: number;

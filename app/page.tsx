@@ -133,6 +133,8 @@ export default function BridgeWork() {
     });
   }
   const errorText = error === 'generation-running' ? '現在マニュアルを生成しています。完了後に操作できます。'
+    : error === 'manual-too-large' ? '画像の合計サイズが大きすぎます。図を減らすか、小さな画像を選んでください。'
+    : error === 'invalid-figures' ? '図を保存できませんでした。JPEG・PNG・WebPの画像と挿入位置を確認してください。'
     : error === 'review-evidence' ? '原文との照合が完了していません。再生成するか、内容を修正して未確認として保存し、改めて確認してください。'
     : error === 'review-images' ? '編集内容を保存し、図解を再生成してから確認済にしてください。'
     : error === 'ai-not-configured' ? 'Gemini の設定が必要です。'
@@ -299,8 +301,8 @@ export default function BridgeWork() {
                 await send({action:'regenerateManual',id:reviewManual.id,version:reviewManual.updatedAt,imagesOnly});
                 setManualStatus('draft');setManualId(reviewManual.id);await refresh(token);
               })}
-              save={(content,publish) => run(async () => {
-                await send({action:'saveManual',id:reviewManual.id,version:reviewManual.updatedAt,content,publish});
+              save={(content,publish,edits) => run(async () => {
+                await send({action:'saveManual',id:reviewManual.id,version:reviewManual.updatedAt,content,publish,...edits});
                 setManualStatus(publish ? 'published' : 'draft');setManualId(reviewManual.id);await refresh(token);
               })}/>}
           </> : <>

@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { copy } from '../lib/copy';
-import { languageNames, languages, type Language, type Manual, type ManualContent, type Question } from '../lib/model';
+import { languageNames, languages, type Language, type Manual, type ManualContent, type ManualEdits, type Question } from '../lib/model';
 import { stairRange } from '../lib/diagrams';
 import { RangeDiagram } from './range-diagram';
+import { ManualEditor } from './manual-editor';
 
 export function isGenerating(manual: Manual) {
   return Boolean(manual.generation && ['queued','analyzing','writing','validating','illustrating'].includes(manual.generation.state) &&
@@ -13,12 +14,28 @@ export function isGenerating(manual: Manual) {
 
 export function ManualView({manual, language, onSelectStep}: {manual: Manual; language: Language; onSelectStep?:(index:number)=>void}) {
   const [displayLanguage,setDisplayLanguage] = useState(language);
+  const documentRef=useRef<HTMLElement>(null);
+  const [exporting,setExporting]=useState(false);
+  const [exportError,setExportError]=useState('');
   useEffect(()=>setDisplayLanguage(language),[language]);
   const content = manual.translations[displayLanguage] ?? manual.content;
   const t = (key: Parameters<typeof copy>[1]) => copy(displayLanguage,key);
   const perStep = manual.imageLayout === 'steps';
   const range = stairRange(manual.content.steps.join(' '));
-  return <article className="manual-document" aria-label={t('manuals')}>
+  const figuresAt=(afterStep:number)=>(manual.figures ?? []).filter(figure=>figure.afterStep===afterStep).map(figure=><figure className="manual-inserted-figure" key={figure.id}>
+    <img src={figure.url} alt={figure.caption || t('procedureImage')}/>{figure.caption && <figcaption>{figure.caption}</figcaption>}
+  </figure>);
+  async function download(format:'pdf'|'jpeg') {
+    setExporting(true);setExportError('');
+    try {const {downloadManual}=await import('./manual-export');await downloadManual(manual,displayLanguage,format,documentRef.current?.querySelector('svg') ?? null);}
+    catch{setExportError('ダウンロードできませんでした。画像の読み込みを確認して、もう一度お試しください。');}
+    finally{setExporting(false);}
+  }
+  return <div className="manual-with-download"><div className="manual-downloads" aria-label="マニュアルをダウンロード">
+    <button className="secondary" type="button" disabled={exporting} onClick={()=>download('pdf')}>↓ PDF</button>
+    <button className="secondary" type="button" disabled={exporting} onClick={()=>download('jpeg')}>↓ JPEG</button>
+    {exporting && <span role="status">作成中…</span>}{exportError && <p role="alert">{exportError}</p>}
+  </div><article ref={documentRef} className="manual-document" aria-label={t('manuals')}>
     <div className="manual-meta"><span className="manual-site"><span aria-hidden="true">▥</span>{manual.siteId === 'sakura' ? 'さくらビル' : manual.siteId}</span>
       <span className={'badge '+(manual.status === 'published' ? 'resolved' : 'active')}>{manual.status === 'published' ? t('reviewed') : t('unreviewed')}</span></div>
     <div className="manual-languages" role="group" aria-label="Language">
@@ -33,15 +50,17 @@ export function ManualView({manual, language, onSelectStep}: {manual: Manual; la
     <section className="manual-procedure">
       <div className="manual-section-heading"><h3>{t('procedure')}</h3></div>
       {range && <RangeDiagram range={range} language={displayLanguage}/>}
+      {figuresAt(-1)}
       <ol className={range ? 'range-instructions' : 'procedure-grid'}>
         {content.steps.map((step,index) => <li className="procedure-card" key={index}>
-          {!range && <div className="procedure-visual">
+          {(!range || (perStep && manual.imageUrls[index])) && <div className="procedure-visual">
             <span className="procedure-number">{String(index + 1).padStart(2,'0')}</span>
             {perStep && manual.imageUrls[index] ? <img src={manual.imageUrls[index]} alt={step} loading="lazy"/> :
               <span className="procedure-symbol" aria-hidden="true">{index === content.steps.length - 1 ? '✓' : '→'}</span>}
           </div>}
           {onSelectStep ? <button className="procedure-text" onClick={()=>onSelectStep(index)}><span aria-hidden="true">{range ? '✓' : String(index+1).padStart(2,'0')}</span>{step}</button> :
             <p className="procedure-text"><span aria-hidden="true">{range ? '✓' : String(index+1).padStart(2,'0')}</span>{step}</p>}
+          {figuresAt(index)}
         </li>)}
       </ol>
       {!range && !perStep && manual.imageUrls.map(url => <img className="procedure-image" key={url} src={url} alt={t('procedureImage')} loading="lazy"/>)}
@@ -50,7 +69,7 @@ export function ManualView({manual, language, onSelectStep}: {manual: Manual; la
       <h3><span aria-hidden="true">!</span>{t('cautions')}</h3>
       <ul>{content.cautions.map((line,index) => <li key={index}>{line}</li>)}</ul>
     </section>}
-  </article>;
+  </article></div>;
 }
 
 const errors: Record<string,string> = {
@@ -76,7 +95,7 @@ const errors: Record<string,string> = {
 export function ManualReview({manual, questions, busy, ai, regenerate, save}: {
   manual: Manual; questions: Question[]; busy: boolean; ai: boolean;
   regenerate: (imagesOnly:boolean) => void;
-  save: (content:ManualContent,publish:boolean) => void;
+  save: (content:ManualContent,publish:boolean,edits?:ManualEdits) => void;
 }) {
   const generating = isGenerating(manual);
   const state = manual.generation?.state;
@@ -139,7 +158,7 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save}: {
         </div>
       </section>
     </div>
-    {!generating && (editing ? <ManualEditor key={manual.id + manual.updatedAt} manual={manual} busy={busy} save={(content,publish)=>{save(content,publish);}}/> :
+    {!generating && (editing ? <ManualEditor key={manual.id + manual.updatedAt} manual={manual} busy={busy} save={save}/> :
       <ReviewApproval key={manual.id+manual.updatedAt} manual={manual} busy={busy} onEdit={()=>setEditing(true)} save={save}/>)}
   </section>;
 }
@@ -152,46 +171,3 @@ function ReviewApproval({manual,busy,onEdit,save}: {manual:Manual; busy:boolean;
       <button disabled={busy || !checked || manual.status==='published' || Boolean(manual.pipeline && ['pending','blocked'].includes(manual.pipeline.verification))} onClick={()=>save(manual.content,true)}>✓ 確認済にする</button></div>
   </div>;
 }
-
-function ManualEditor({manual,busy,save}: {manual:Manual; busy:boolean; save:(content:ManualContent,publish:boolean)=>void}) {
-  const [title,setTitle] = useState(manual.content.title);
-  const [steps,setSteps] = useState(manual.content.steps);
-  const [cautions,setCautions] = useState(manual.content.cautions);
-  const [confirmed,setConfirmed] = useState(false);
-  const content = {...manual.content,title,steps,cautions};
-  const changedSteps = JSON.stringify(steps) !== JSON.stringify(manual.content.steps);
-  const canPublish = !busy && confirmed && !changedSteps && !Boolean(manual.pipeline && ['pending','blocked'].includes(manual.pipeline.verification));
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const publish = (event.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'publish';
-    if (publish && !canPublish) return;
-    save({...content, title:title.trim(), steps:steps.map(step=>step.trim()), cautions:cautions.map(line=>line.trim()).filter(Boolean)},publish);
-  }
-  function changeStep(index:number,value:string) {
-    setSteps(current => current.map((step,i) => i === index ? value : step)); setConfirmed(false);
-  }
-  return <form className="flow manual-editor" onSubmit={submit}>
-    <div className="split"><h3>内容を整える</h3><span className="muted">編集内容を保存してプレビューに反映</span></div>
-    <label>質問内容<input required maxLength={250} value={title} onChange={event => {setTitle(event.target.value);setConfirmed(false);}}/></label>
-    <fieldset><legend>対処法</legend>{steps.map((step,index) => <div className="edit-step" key={index}>
-      <label><span>STEP {String(index + 1).padStart(2,'0')}</span><textarea rows={2} required maxLength={500} value={step} onChange={event => changeStep(index,event.target.value)}/></label>
-      {manual.evidence?.steps[index]?.length && !changedSteps ? <details className="step-evidence"><summary>根拠となる回答</summary>
-        {manual.evidence.steps[index].map((source,i) => <blockquote key={i}>{source.quote}</blockquote>)}</details> : null}
-      <div className="actions">
-        <button className="link" type="button" disabled={index===0 || busy} onClick={() => {
-          const next=[...steps]; [next[index-1],next[index]]=[next[index],next[index-1]]; setSteps(next);setConfirmed(false);
-        }}>↑ 上へ</button>
-        <button className="link" type="button" disabled={steps.length===1 || busy} onClick={() => {setSteps(steps.filter((_,i)=>i!==index));setConfirmed(false);}}>削除</button>
-      </div>
-    </div>)}
-    <button className="secondary" type="button" disabled={steps.length>=12 || busy} onClick={() => {setSteps([...steps,'']);setConfirmed(false);}}>＋ 手順を追加</button></fieldset>
-    <label>注意事項 <span className="muted">会話に注意がある場合のみ記入</span><textarea rows={2} maxLength={4000} value={cautions.join('\n')}
-      onChange={event => {setCautions(event.target.value ? event.target.value.split('\n') : []);setConfirmed(false);}}/></label>
-    {changedSteps && <p className="notice">手順を変更した場合は、保存後に図解を再生成し、内容を確認してください。</p>}
-    <label className="check"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)}/>
-      会話との一致、作業条件、文章と図の対応を確認しました</label>
-    <div className="actions"><button className="secondary" disabled={busy} value="draft">未確認として保存</button>
-      <button disabled={!canPublish} value="publish">✓ 確認済にする</button></div>
-  </form>;
-}
-

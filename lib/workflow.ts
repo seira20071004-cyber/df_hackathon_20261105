@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { aiConfigured, generate, manualContent, relevance, summarize, translate } from './ai';
 import { buildManual, generationRunning } from './manuals';
 import { stairRange } from './diagrams';
+import { figureSchema, normalizeFigures, reorderedAssets } from './manual-assets';
 import { isScoped, languageNames, languages, mayReadManual, mayReadQuestion, mayReuse, topic, type Language, type Manual, type Match, type Profile, type Question } from './model';
 import { isDemo, list, mutate, resolveWithManual, setLanguage, slug } from './storage';
 
@@ -20,7 +21,8 @@ export const actionSchema = z.discriminatedUnion('action', [
   z.object({action: z.literal('selfResolve'), ...location, text, language: z.enum(languages), matchId: slug, kind: z.enum(['question','manual']), id: z.uuid()}),
   z.object({action: z.literal('viewManual'), ...record, version: z.string().max(40)}),
   z.object({action: z.literal('regenerateManual'), ...record, version: z.string().max(40), imagesOnly: z.boolean()}),
-  z.object({action: z.literal('saveManual'), ...record, content: manualContent, publish: z.boolean(), version: z.string().max(40)})
+  z.object({action: z.literal('saveManual'), ...record, content: manualContent, publish: z.boolean(), version: z.string().max(40),
+    stepSources:z.array(z.number().int().min(-1).max(11)).max(12).optional(), figures:z.array(figureSchema).max(12).optional()})
 ]);
 export type Action = z.infer<typeof actionSchema>;
 export class ApiError extends Error {
@@ -211,9 +213,16 @@ export async function execute(profile: Profile, input: Action) {
   const translations: Manual['translations'] = {};
   const sameSteps = JSON.stringify(previous.content.steps) === JSON.stringify(input.content.steps);
   const sameContent = JSON.stringify(previous.content) === JSON.stringify(input.content);
+  let assets:ReturnType<typeof reorderedAssets>;
+  let figures=previous.figures ?? [];
+  try {
+    assets=reorderedAssets(previous,input.content,input.stepSources);
+    if(input.figures) figures=await normalizeFigures(input.figures,input.content.steps.length);
+    else if(!sameSteps) figures=[];
+  } catch(error) {throw new ApiError(400,error instanceof Error && error.message==='manual-too-large'?'manual-too-large':'invalid-figures');}
   if(input.publish && previous.pipeline && ['pending','blocked'].includes(previous.pipeline.verification)) throw new ApiError(400,'review-evidence');
   const rangeDiagram = stairRange(input.content.steps.join(' '));
-  if (input.publish && aiConfigured() && (!sameSteps || (!previous.imageUrls.length && !rangeDiagram))) throw new ApiError(400, 'review-images');
+  if (input.publish && aiConfigured() && (!sameSteps || (!assets.images.some(Boolean) && !figures.length && !rangeDiagram))) throw new ApiError(400, 'review-images');
   if (input.publish) {
     await Promise.all((['en','vi'] as const).map(async language => {
       const translation = await generate(manualContent, '元の構造と作業指示を変えずに翻訳してください。追加や省略は禁止です。', {language: languageNames[language], manual: input.content});
@@ -224,14 +233,16 @@ export async function execute(profile: Profile, input: Action) {
     if (!manual || !isScoped(profile, manual)) throw new ApiError(404, 'not-found');
     if (manual.updatedAt !== input.version) throw new ApiError(409, 'stale-manual');
     if (generationRunning(manual)) throw new ApiError(409, 'generation-running');
-    const next: Manual = {...manual, content: input.content, translations, imageUrls: sameSteps ? manual.imageUrls : [],
+    const next: Manual = {...manual, content: input.content, translations, imageUrls: assets.images, figures,
       ...(sameSteps ? {} : {imageLayout: 'steps' as const}),
-      evidence: sameContent ? manual.evidence ?? {steps: [], cautions: []} : {steps: [], cautions: []},
+      evidence: sameContent ? manual.evidence ?? {steps: [], cautions: []} :
+        {steps:assets.evidence,cautions:JSON.stringify(manual.content.cautions)===JSON.stringify(input.content.cautions)?manual.evidence?.cautions ?? []:[]},
       ...(manual.pipeline && !sameContent ? {pipeline:{...manual.pipeline,verification:'edited' as const,issues:[]}} : {}),
-      generation: sameSteps ? manual.generation ?? {state:'ready', attemptId:randomUUID(), startedAt:date()} :
+      generation: sameSteps || assets.unchanged ? manual.generation ?? {state:'ready', attemptId:randomUUID(), startedAt:date()} :
         {state:'failed', error:'content-changed', attemptId:randomUUID(), startedAt:date()},
       languages: ['ja', ...Object.keys(translations) as Language[]],
       status: input.publish ? 'published' : 'draft', approvedBy: input.publish ? profile.id : null, updatedAt: date()};
+    if(Buffer.byteLength(JSON.stringify(next))>950_000)throw new ApiError(400,'manual-too-large');
     return next;
   });
 }
