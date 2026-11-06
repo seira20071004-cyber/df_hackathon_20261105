@@ -1,6 +1,7 @@
 import {copy} from '../lib/copy';
 import {A4,fitA4Content} from '../lib/manual-document';
 import type {Language,Manual} from '../lib/model';
+import {paperProgram} from '../lib/manual-graph';
 
 const FONT='"Yu Gothic UI", "Segoe UI", Arial, sans-serif',M=44,WIDTH=A4.width-2*M;
 type Paint=(ctx:CanvasRenderingContext2D)=>void;
@@ -9,6 +10,11 @@ const loadImage=(url:string)=>new Promise<HTMLImageElement>((resolve,reject)=>{c
 
 export async function renderA4Manual(manual:Manual,language:Language,overview:HTMLImageElement|null) {
   await document.fonts.ready;
+  const program=manual.programTranslations?.[language]??manual.program;
+  if(program){const stepIds=program.blocks.filter(block=>block.type==='step').map(block=>block.id);
+    manual={...manual,content:paperProgram(program),translations:{},imageLayout:'steps',imageUrls:program.blocks.map(block=>block.type==='step'?manual.imageUrls[stepIds.indexOf(block.id)]??'':''),
+      figures:(manual.figures??[]).map(figure=>({...figure,afterStep:figure.afterStep<0?-1:program.blocks.findIndex(block=>block.id===stepIds[figure.afterStep])}))};
+  }
   const content=manual.translations[language] ?? manual.content,t=(key:Parameters<typeof copy>[1])=>copy(language,key);
   const urls=[...new Set([...manual.imageUrls,...(manual.figures ?? []).map(figure=>figure.url)].filter(Boolean))];
   const pictures=new Map(await Promise.all(urls.map(async url=>[url,await loadImage(url)] as const)));
@@ -40,6 +46,7 @@ export async function renderA4Manual(manual:Manual,language:Language,overview:HT
       }
     }
     heading(t('manualQuestion'));text(content.title,style.font+7,700);y+=16;
+    if(program?.description){text(program.description,style.font-2);y+=12;}
     heading(t('procedure'));
     if(overview){const size=pictureSize(overview,WIDTH,style.hero),top=y;draw.push(ctx=>ctx.drawImage(overview,(A4.width-size.width)/2,top,size.width,size.height));y+=size.height+style.gap;}
     gallery(figures(-1));
@@ -55,8 +62,8 @@ export async function renderA4Manual(manual:Manual,language:Language,overview:HT
       });
       const rowHeight=Math.max(...cards.map(card=>card.height)),top=y;
       cards.forEach((card,column)=>{const x=M+column*(cardWidth+style.gap);draw.push(ctx=>{
-        ctx.fillStyle='#f6f9ff';ctx.fillRect(x,top,cardWidth,rowHeight);ctx.strokeStyle='#dce5f0';ctx.strokeRect(x+.5,top+.5,cardWidth-1,rowHeight-1);
-        ctx.fillStyle='#154fd2';ctx.font=`700 13px ${FONT}`;ctx.fillText('STEP '+String(card.index+1).padStart(2,'0'),x+style.pad,top+style.pad+14);
+        const type=program?.blocks[card.index]?.type??'step';ctx.fillStyle=type==='warning'?'#fff4e3':type==='branch'?'#f4f0ff':type==='check'?'#eaf8f2':'#f6f9ff';ctx.fillRect(x,top,cardWidth,rowHeight);ctx.strokeStyle='#dce5f0';ctx.strokeRect(x+.5,top+.5,cardWidth-1,rowHeight-1);
+        ctx.fillStyle='#154fd2';ctx.font=`700 13px ${FONT}`;ctx.fillText(type.toUpperCase()+' '+String(card.index+1).padStart(2,'0'),x+style.pad,top+style.pad+14);
         ctx.fillStyle='#10233e';ctx.font=`${style.font}px ${FONT}`;
         card.body.forEach((line,i)=>ctx.fillText(line,x+style.pad,top+style.pad+26+style.font+i*style.font*1.45));
         let imageY=top+style.pad+26+card.body.length*style.font*1.45+10;

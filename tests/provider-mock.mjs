@@ -1,4 +1,5 @@
 import sharp from 'sharp';
+import {programFixture,qualityFixture} from './interactive-fixtures.mjs';
 
 const originalFetch = globalThis.fetch;
 const grid = await sharp({create:{width:800,height:600,channels:3,background:'#dceaff'}}).composite([
@@ -8,41 +9,49 @@ const grid = await sharp({create:{width:800,height:600,channels:3,background:'#d
 globalThis.fetch = async (url,options) => {
   if (!String(url).startsWith('https://generativelanguage.googleapis.com/')) return originalFetch(url,options);
   const request = JSON.parse(options.body);
+  if(String(url).includes('EmbedContent')||String(url).includes('embedContent')){const active=JSON.stringify(request).includes('低類似度')?1:0;const values=Array.from({length:256},(_,index)=>index===active?1:0);return Response.json({embeddings:[{values}],embedding:{values}});}
   if (request.generationConfig?.responseModalities?.includes('IMAGE')) {
     await new Promise(resolve=>setTimeout(resolve,500));
     if (request.contents[0].parts[0].text.includes('画像失敗')) return Response.json({error:{status:'RESOURCE_EXHAUSTED'}},{status:429});
     return Response.json({candidates:[{content:{parts:[{inlineData:{mimeType:'image/png',data:grid.toString('base64')}}]}}]});
   }
   const schema=request.generationConfig?.responseJsonSchema;
+  const input=JSON.parse(request.contents[0].parts[0].text);
+  const context=input.context??input;
+  if(context.question?.includes('API障害'))return Response.json({error:{code:503,message:'mock unavailable',status:'UNAVAILABLE'}},{status:503});
+  if(context.question?.includes('利用枠エラー'))return Response.json({error:{code:429,message:'mock quota',status:'RESOURCE_EXHAUSTED'}},{status:429});
+  if(context.question?.includes('不正JSON'))return Response.json({candidates:[{content:{parts:[{text:'{"broken":'}]}}]});
   let result;
-  if(schema?.properties?.facts) {
-    const input=JSON.parse(request.contents[0].parts[0].text);
-    const messages=input.conversation.filter(message=>message.role==='manager');
-    const source=messages.at(-1);
-    const quote=input.question.includes('根拠失敗') ? '会話に存在しない架空の指示' : source.original;
-    result={facts:[{id:'f1',kind:'action',text:source.original,status:'current',evidence:[{messageId:source.id,quote}]}],
-      unresolved:input.question.includes('矛盾失敗')?['保管場所の回答が矛盾しています']:[]};
-  } else if (schema?.properties?.steps?.items?.properties?.evidence) {
-    const input=JSON.parse(request.contents[0].parts[0].text);
-    const evidence=input.facts[0].evidence;
-    result={title:input.question,steps:[
-      {text:input.question.includes('画像失敗') ? '画像失敗の手順を確認する' : '1階の清掃用具室へ行く',evidence},
-      {text:'指定の保管棚を確認する',evidence}
-    ],cautions:[]};
-  } else if(schema?.properties?.titleMatchesQuestion) {
-    const input=JSON.parse(request.contents[0].parts[0].text);
-    const invalid=input.context.question.includes('意味失敗');
-    result={titleMatchesQuestion:true,relevantFactsCovered:true,unresolvedConflict:false,
-      checks:input.candidate.steps.map((_,index)=>({kind:'step',index,supported:!invalid,conditionsPreserved:true,currentFactsOnly:true,
-        reason:invalid?'引用は実在するが対処法を裏付けていない':'原文と一致'}))};
+  if(schema?.properties?.hasAlternativeMethods) {
+    const source=input.sources.find(source=>source.role==='manager');
+    const supplemented=input.sources.some(source=>source.role==='manager_supplement');
+    const quote=input.question.includes('根拠失敗')?'存在しない指示':source.text;
+    const kinds=[['a1','action','汚れを目で確認する'],['a2','action','乾いた布で拭く'],['criterion','criterion','商品名が表示されたら解決']];
+    if(input.question.includes('分岐'))kinds.push(['condition','condition','汚れているかどうか'],['warning','warning','分解は禁止']);
+    const alternatives=input.question.includes('追加確認')||input.question.includes('上限');
+    result={title:input.question,description:'商品を読み取れない場合の確認手順',causeKnown:false,hasAlternativeMethods:alternatives,successfulActionIds:alternatives&&supplemented?['a1']:[],unknowns:['原因は不明'],
+      facts:kinds.map(([id,kind,text])=>({id,kind,text,status:'current',evidence:[{messageId:source.id,quote}]}))};
+  } else if(schema?.properties?.ready&&schema.properties.questions) {
+    const missing=(input.context.question.includes('追加確認')&&!input.answers.length)||input.context.question.includes('上限');
+    result={ready:!missing,hold:false,questions:missing?[{id:'q'+(input.previousQuestions.length+1),question:`解決した操作を確認してください（${input.previousQuestions.length+1}）`,reason:'複数の方法のうち成功した操作を確定するため',sourceMessageIds:[input.context.sources.find(source=>source.role==='manager').id]}]:[]};
+  } else if(schema?.properties?.startBlockId) {
+    if(input.program){result=structuredClone(input.program);result.language=input.language;}
+    else {
+      result=programFixture(input.context.question.includes('分岐'));result.title=input.extraction.title;const source=input.context.sources.find(source=>source.role==='manager').id;
+      for(const block of result.blocks)block.sourceMessageIds=[source];
+      if(input.context.question.includes('構造失敗'))result.blocks[0].nextBlockId='missing';
+      if(input.context.question.includes('画像失敗'))result.blocks.find(block=>block.type==='step').content='画像失敗の手順';
+    }
+  } else if(schema?.properties?.accurate) {
+    result=qualityFixture(input.candidate);
+    if(input.context.question.includes('意味失敗')){result.accurate=false;result.checks[0].supported=false;result.issues=[{blockId:input.candidate.blocks[0].id,category:'accuracy',message:'根拠と操作が一致しません'}];}
+  } else if(schema?.properties?.preserved) {
+    result={preserved:true};
   } else if (schema?.properties?.text) {
-    const input=JSON.parse(request.contents[0].parts[0].text);
     result={text:typeof input==='string' ? input : input.value ?? '参考訳'};
   } else if (schema?.properties?.ids) {
-    const input=JSON.parse(request.contents[0].parts[0].text);
-    result={ids:input.candidates.slice(0,1).map(candidate=>candidate.id)};
+    result={ids:input.question.includes('全く違う')?[]:input.candidates.slice(0,1).map(candidate=>candidate.id)};
   } else {
-    const input=JSON.parse(request.contents[0].parts[0].text);
     result=input.manual;
   }
   return Response.json({candidates:[{content:{parts:[{text:JSON.stringify(result)}]}}]});

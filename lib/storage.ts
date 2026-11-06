@@ -7,7 +7,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore, type CollectionReference } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import { demoProfiles, seedDemo } from './demo';
-import { languages, type Profile, type Question, type Manual, type ManualView, type ManualDelivery, type StaffRecipient } from './model';
+import { languages, type Profile, type Question, type Manual, type ManualView, type ManualDelivery, type StaffRecipient,type ManualUse } from './model';
 
 export const isDemo = () => process.env.BRIDGE_DEMO === 'true';
 export const slug = z.string().regex(/^[a-zA-Z0-9_-]{1,120}$/);
@@ -27,7 +27,7 @@ export async function authenticate(token: string): Promise<Profile | null> {
 export async function setLanguage(profile: Profile, preferredLanguage: Profile['preferredLanguage']) {
   if (!isDemo()) await getFirestore(app()).collection('users').doc(profile.id).update({preferredLanguage});
 }
-type Records = {questions: Question; manuals: Manual; manualViews: ManualView; manualDeliveries:ManualDelivery};
+type Records = {questions: Question; manuals: Manual; manualViews: ManualView; manualDeliveries:ManualDelivery;manualUses:ManualUse};
 type Table = keyof Records;
 type DemoState = {[K in Table]: Records[K][]};
 const folder = process.env.BRIDGE_DEMO_DATA_DIR || '.bridge-work';
@@ -35,10 +35,10 @@ const demoFile = join(folder, 'data.json');
 let pending = Promise.resolve();
 async function readDemo(): Promise<DemoState> {
   try {
-    return {manualViews: [], manualDeliveries:[], ...JSON.parse(await readFile(demoFile, 'utf8'))};
+    return {manualViews: [], manualDeliveries:[],manualUses:[], ...JSON.parse(await readFile(demoFile, 'utf8'))};
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    return {...seedDemo(), manualViews: [],manualDeliveries:[]};
+    return {...seedDemo(), manualViews: [],manualDeliveries:[],manualUses:[]};
   }
 }
 export async function staffRecipients(profile:Profile):Promise<StaffRecipient[]> {
@@ -156,5 +156,37 @@ export async function resolveWithManual(profile: Profile, siteId: string, manual
       data.manuals.push(manual);
     }
     return {question: next, created: previous !== next};
+  });
+}
+
+export async function recordManualSession(profile:Profile,record:ManualUse,question?:Question){
+  const {siteId}=record;
+  if(profile.role!=='employee'||!profile.siteIds.includes(siteId)||record.organizationId!==profile.organizationId||record.employeeId!==profile.id)throw new Error('forbidden');
+  const viewId=createHash('sha256').update(JSON.stringify([profile.id,record.manualId])).digest('hex');
+  function validate(manual:Manual|undefined,view:ManualView|undefined,previous:ManualUse|undefined){
+    if(!manual||manual.organizationId!==profile.organizationId||manual.siteId!==siteId||manual.status!=='published'||manual.updatedAt!==record.version||!manual.program)throw new Error('manual-unavailable');
+    if(!view||view.employeeId!==profile.id||view.version!==record.version)throw new Error('manual-unavailable');
+    if(previous&&(previous.employeeId!==profile.id||previous.manualId!==record.manualId||previous.version!==record.version))throw new Error('session-conflict');
+    if(record.outcome!=='started'&&!previous)throw new Error('session-not-started');
+  }
+  const next=(previous:ManualUse|undefined)=>previous?.outcome==='resolved'||previous?.outcome==='unresolved'||(previous&&record.outcome==='started')?previous:
+    {...record,createdAt:previous?.createdAt??record.createdAt};
+  if(isDemo())return mutateDemo(data=>{
+    const previous=data.manualUses.find(row=>row.id===record.id);
+    validate(data.manuals.find(row=>row.id===record.manualId),data.manualViews.find(row=>row.id===viewId),previous);
+    const saved=next(previous);if(saved===previous)return {use:saved,question:previous?.questionId?data.questions.find(row=>row.id===previous.questionId):undefined};
+    if(question&&data.questions.some(row=>row.id===question.id))throw new Error('session-conflict');
+    const index=data.manualUses.findIndex(row=>row.id===record.id);if(index<0)data.manualUses.push(saved);else data.manualUses[index]=saved;
+    if(question)data.questions.push(question);return {use:saved,question};
+  });
+  const useDoc=collection(profile,siteId,'manualUses').doc(record.id),manualDoc=collection(profile,siteId,'manuals').doc(record.manualId),viewDoc=collection(profile,siteId,'manualViews').doc(viewId);
+  return useDoc.firestore.runTransaction(async tx=>{
+    const manual=(await tx.get(manualDoc)).data(),view=(await tx.get(viewDoc)).data(),previous=(await tx.get(useDoc)).data();
+    validate(manual,view,previous);const saved=next(previous);
+    const questionDoc=question?collection(profile,siteId,'questions').doc(question.id):previous?.questionId?collection(profile,siteId,'questions').doc(previous.questionId):undefined;
+    const existingQuestion=questionDoc?(await tx.get(questionDoc)).data():undefined;
+    if(saved===previous)return {use:saved,question:existingQuestion};
+    if(question&&existingQuestion)throw new Error('session-conflict');
+    tx.set(useDoc,saved);if(question&&questionDoc)tx.create(questionDoc,question);return {use:saved,question};
   });
 }

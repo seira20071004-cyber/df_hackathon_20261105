@@ -5,6 +5,7 @@ import { copy } from '../lib/copy';
 import { ManualReview, ManualView, isGenerating } from './manual';
 import {ManualInbox,ManualSend} from './manual-delivery';
 import {Settings,WorkspaceShell,type AppTab} from './workspace-shell';
+import type {ManualEvent} from './manual-guide';
 import { languageNames, languages, type Language, type Manual, type Match, type Question, type Workspace } from '../lib/model';
 
 const focusSearchResults = (heading: HTMLHeadingElement | null) => heading?.focus();
@@ -137,6 +138,10 @@ export default function BridgeWork() {
   function readManual(target:Manual) {
     run(async()=>{await send({action:'viewManual',id:target.id,version:target.updatedAt});await refresh(token);openManual(target.id);});
   }
+  const manualEvent=(target:Manual):ManualEvent=>async(event,runId,path,text,eventLanguage)=>{
+    const result=await send<{question?:Question}>({action:'manualSession',id:target.id,version:target.updatedAt,event,runId,path,text,language:eventLanguage??language});
+    await refresh(token);if(result.question)openCase(result.question.id);return result;
+  };
   function ask(match?: Match) {
     run(async () => {
       const created = await send<Question>({action:match ? 'selfResolve' : 'ask', id:crypto.randomUUID(), text:query, language,
@@ -146,6 +151,11 @@ export default function BridgeWork() {
     });
   }
   const errorText = error === 'generation-running' ? '現在マニュアルを生成しています。完了後に操作できます。'
+    : error === 'invalid-program' ? '未入力の項目、分岐先、到達不能なブロックや循環を確認してください。'
+    : error === 'program-evidence' ? '操作や作業権限の根拠が不足しています。内容を編集し、未確認として保存してから確認してください。'
+    : error === 'review-permissions' ? '内容と必要な作業権限を確認してから承認してください。'
+    : error === 'answer-required' || error === 'incomplete-answers' ? '追加質問へ回答するか、手動編集して未確認として保存してください。'
+    : error === 'use-program-editor' ? '対話型マニュアルの編集画面を使ってください。'
     : error === 'manual-too-large' ? '画像の合計サイズが大きすぎます。図を減らすか、小さな画像を選んでください。'
     : error === 'invalid-figures' ? '図を保存できませんでした。JPEG・PNG・WebPの画像と挿入位置を確認してください。'
     : error === 'review-evidence' ? '原文との照合が完了していません。再生成するか、内容を修正して未確認として保存し、改めて確認してください。'
@@ -192,8 +202,8 @@ export default function BridgeWork() {
               <div className="eyebrow">{siteName(match.siteId)} · {t(match.kind === 'manual' ? 'manuals' : 'cases')}</div>
               <h3>{match.title}</h3>
               {manual?.id === match.id ? <>
-                <ManualView manual={manual} language={language}/>
-                <button className="secondary" disabled={busy} onClick={() => ask(match)}>{t('selfResolve')}</button>
+                <ManualView manual={manual} language={language} onEvent={manualEvent(manual)} contextText={query}/>
+                {!manual.program&&<button className="secondary" disabled={busy} onClick={() => ask(match)}>{t('selfResolve')}</button>}
               </> : <><p>{t('manualFits')}</p><div className="actions">
                 <button className="secondary" disabled={busy} onClick={() => run(async () => {
                   await send({action:'viewManual',id:match.id,version:match.version});
@@ -279,13 +289,17 @@ export default function BridgeWork() {
               </div>
               {reviewManual ? <label className="manual-picker">マニュアルを選択
                 <select value={reviewManual.id} onChange={event=>setManualId(event.target.value)}>
-                  {manuals.filter(row=>row.status===manualStatus).map(row=><option value={row.id} key={row.id}>{row.content.title}{isGenerating(row) ? '（生成中）' : ''}</option>)}
+                  {manuals.filter(row=>row.status===manualStatus).map(row=><option value={row.id} key={row.id}>{row.content.title}（{row.status==='published'?'公開済':isGenerating(row)?'生成中':row.reviewState==='awaiting_answers'?'追加質問待ち':row.reviewState==='held'?'保留':'承認待ち'}）</option>)}
                 </select>
               </label> : <p className="empty">{t('empty')}</p>}
             </section>
             {reviewManual?.status==='published' && <ManualSend key={reviewManual.id+reviewManual.updatedAt} manual={reviewManual} staff={data.staff} deliveries={deliveries} busy={busy}
               onSend={async employeeIds=>{await send({action:'sendManual',id:reviewManual.id,version:reviewManual.updatedAt,employeeIds});await refresh(token);}}/>}
             {reviewManual && <ManualReview key={reviewManual.id} manual={reviewManual} questions={questions} busy={busy} ai={data.ai}
+              stats={data.manualStats?.[reviewManual.id]}
+              answer={answers=>run(async()=>{await send({action:'answerManual',id:reviewManual.id,version:reviewManual.updatedAt,answers});await refresh(token);})}
+              changeState={mode=>run(async()=>{await send({action:'manualState',id:reviewManual.id,version:reviewManual.updatedAt,mode});setManualStatus('draft');setManualId(reviewManual.id);await refresh(token);})}
+              saveProgram={(program,publish,confirmPermissions)=>run(async()=>{await send({action:'saveProgram',id:reviewManual.id,version:reviewManual.updatedAt,program,publish,confirmPermissions});setManualStatus(publish?'published':'draft');setManualId(reviewManual.id);await refresh(token);})}
               regenerate={imagesOnly => run(async () => {
                 await send({action:'regenerateManual',id:reviewManual.id,version:reviewManual.updatedAt,imagesOnly});
                 setManualStatus('draft');setManualId(reviewManual.id);await refresh(token);
@@ -302,7 +316,7 @@ export default function BridgeWork() {
                 <span className="tile">▤</span><span className="row-text"><strong>{(row.translations[language] ?? row.content).title}</strong><small>{siteName(row.siteId)}</small></span>
                 <span>›</span></button>)}</div> : <p className="empty">{t('empty')}</p>}
             </section>
-            {manual && <ManualView manual={manual} language={language}/>}
+            {manual && <ManualView manual={manual} language={language} onEvent={manualEvent(manual)}/>}
           </>}
         </>}
         <footer>Bridge Work <span>·</span> {siteName(site)}</footer>

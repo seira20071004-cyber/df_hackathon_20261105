@@ -1,3 +1,4 @@
+import type {AdditionalAnswer,ExtractedChat,GapQuestion,ManualProgram,QualityReport} from './manual-graph';
 export const languages = ['ja', 'en', 'vi'] as const;
 export type Language = typeof languages[number];
 export type Role = 'employee' | 'manager';
@@ -60,8 +61,18 @@ export interface Manual {
   imageUrls: string[];
   createdAt: string;
   updatedAt: string;
+  revision?:number;
+  approvedAt?:string|null;
+  reviewState?:'awaiting_answers'|'pending_approval'|'held';
+  program?:ManualProgram;
+  programTranslations?:Partial<Record<Language,ManualProgram>>;
+  extraction?:ExtractedChat;
+  clarification?:{round:number;questions:GapQuestion[];previousQuestions:GapQuestion[];answers:AdditionalAnswer[]};
+  quality?:{report?:QualityReport;issues:string[];repairs:number};
+  audit?:{revision:number;at:string;actor:string;action:'generated'|'edited'|'published'|'unpublished'|'held';changes:string[]}[];
+  embedding?:{model:string;hash:string;values:number[]};
   generation?: {
-    state: 'queued' | 'analyzing' | 'writing' | 'validating' | 'illustrating' | 'ready' | 'failed';
+    state: 'queued' | 'analyzing' | 'checking_gaps' | 'writing' | 'validating' | 'illustrating' | 'awaiting_answers' | 'held' | 'ready' | 'failed';
     attemptId: string;
     startedAt: string;
     error?: string;
@@ -81,7 +92,7 @@ export interface Manual {
     model:string;
     factCount:number;
     supersededCount:number;
-    facts?:{id:string;kind:'action'|'scope'|'condition'|'caution';text:string;status:'current'|'superseded';messageIds:string[]}[];
+    facts?:{id:string;kind:ExtractedChat['facts'][number]['kind']|'caution';text:string;status:'current'|'superseded';messageIds:string[]}[];
     verification:'pending'|'passed'|'blocked'|'edited';
     issues:string[];
     verifiedAt?:string;
@@ -117,6 +128,8 @@ export interface ManualDelivery {
   id:string;organizationId:string;siteId:string;manualId:string;version:string;
   employeeId:string;sentBy:string;createdAt:string;readAt:string|null;
 }
+export interface ManualUse {id:string;organizationId:string;siteId:string;manualId:string;version:string;employeeId:string;runId:string;
+  outcome:'started'|'resolved'|'unresolved';path:string[];createdAt:string;finishedAt:string|null;questionId:string|null;}
 export type StaffRecipient=Pick<Profile,'id'|'name'|'siteIds'>;
 export interface Workspace {
   profile: Profile;
@@ -126,11 +139,14 @@ export interface Workspace {
   manuals: Manual[];
   staff:StaffRecipient[];
   deliveries:ManualDelivery[];
+  manualStats:Record<string,{uses:number;resolved:number;unresolved:number}>;
 }
 export const languageNames = {ja: '日本語', en: 'English', vi: 'Tiếng Việt'};
-export const categories = ['階段', '洗剤', 'ごみ', '写真', '汚れ', 'その他'] as const;
+export const categories = ['安全','作業範囲','数量・記録','場所・保管','設備・操作','備品・材料','その他'] as const;
 export function topic(text: string) {
-  const patterns = [/階段|階段室|stair|cầu thang/iu, /洗剤|detergent|cleaning product|chất tẩy|nước lau/iu, /ゴミ|ごみ|trash|garbage|waste|rác/iu, /写真|photo|ảnh/iu, /汚れ|stain|vết bẩn/iu];
+  const patterns = [/危険|禁止|けが|事故|danger|injur|nguy hiểm|cấm/iu,/範囲|どこまで|何階|対象|which floor|how far|phạm vi|tầng nào/iu,
+    /何枚|何個|いくつ|写真|記録|how many|photo|bao nhiêu|ảnh/iu,/どこ|場所|保管|where|stored|location|ở đâu|cất/iu,
+    /機械|設備|電源|バーコード|レジ|階段|scan|machine|power|stair|cầu thang|máy/iu,/材料|道具|備品|洗剤|ごみ|ゴミ|suppl|material|detergent|garbage|rác|chất tẩy/iu];
   const index = patterns.findIndex(pattern => pattern.test(text));
   return index < 0 ? 'その他' : categories[index];
 }

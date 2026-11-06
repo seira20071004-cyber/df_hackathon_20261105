@@ -6,19 +6,23 @@ import { languageNames, languages, type Language, type Manual, type ManualConten
 import { stairRange } from '../lib/diagrams';
 import { RangeDiagram } from './range-diagram';
 import { ManualEditor } from './manual-editor';
+import {ManualGuide,type ManualEvent} from './manual-guide';
+import {ProgramEditor} from './program-editor';
+import type {ManualProgram} from '../lib/manual-graph';
 
 export function isGenerating(manual: Manual) {
-  return Boolean(manual.generation && ['queued','analyzing','writing','validating','illustrating'].includes(manual.generation.state) &&
+  return Boolean(manual.generation && ['queued','analyzing','checking_gaps','writing','validating','illustrating'].includes(manual.generation.state) &&
     Date.now() - Date.parse(manual.generation.startedAt) < 300_000);
 }
 
-export function ManualView({manual, language, onSelectStep}: {manual: Manual; language: Language; onSelectStep?:(index:number)=>void}) {
+export function ManualView({manual, language, onSelectStep,onSelectBlock,onEvent,contextText}: {manual: Manual; language: Language; onSelectStep?:(index:number)=>void;onSelectBlock?:(id:string)=>void;onEvent?:ManualEvent;contextText?:string}) {
   const [displayLanguage,setDisplayLanguage] = useState(language);
   const documentRef=useRef<HTMLElement>(null);
   const [exporting,setExporting]=useState(false);
   const [exportError,setExportError]=useState('');
   useEffect(()=>setDisplayLanguage(language),[language]);
   const content = manual.translations[displayLanguage] ?? manual.content;
+  const program=manual.programTranslations?.[displayLanguage]??manual.program;
   const t = (key: Parameters<typeof copy>[1]) => copy(displayLanguage,key);
   const perStep = manual.imageLayout === 'steps';
   const range = stairRange(manual.content.steps.join(' '));
@@ -48,7 +52,7 @@ export function ManualView({manual, language, onSelectStep}: {manual: Manual; la
       <h2>{content.title}</h2>
       {displayLanguage !== 'ja' && !manual.translations[displayLanguage] && <p className="manual-language">{t('onlyJapanese')}</p>}
     </header>
-    <section className="manual-procedure">
+    {program?<ManualGuide key={manual.id+manual.updatedAt+displayLanguage} manual={manual} program={program} language={displayLanguage} onEvent={onEvent} onBlock={onSelectBlock} contextText={contextText}/>:<><section className="manual-procedure">
       <div className="manual-section-heading"><h3>{t('procedure')}</h3></div>
       {range && <RangeDiagram range={range} language={displayLanguage}/>}
       {figuresAt(-1)}
@@ -69,7 +73,7 @@ export function ManualView({manual, language, onSelectStep}: {manual: Manual; la
     {content.cautions.length > 0 && <section className="manual-cautions">
       <h3><span aria-hidden="true">!</span>{t('cautions')}</h3>
       <ul>{content.cautions.map((line,index) => <li key={index}>{line}</li>)}</ul>
-    </section>}
+    </section>}</>}
   </article></div>;
 }
 
@@ -92,35 +96,54 @@ const errors: Record<string,string> = {
   ,'verification-unavailable':'原文との照合が完了しませんでした。確認済にはせず、再生成してください。'
   ,'context-limit':'会話が処理上限を超えています。会話を切り捨てずに生成を停止しました。'
   ,'context-scope':'現場の範囲を確認できないため、生成を停止しました。'
+  ,'invalid-json':'Geminiの出力形式を検証できませんでした。再生成できます。'
+  ,'generation-timeout':'生成が時間内に完了しませんでした。再生成できます。'
+  ,'review-required':'品質検証または情報確認のため保留しています。下の確認事項を参照してください。'
 };
-export function ManualReview({manual, questions, busy, ai, regenerate, save}: {
+export function ManualReview({manual, questions, busy, ai, regenerate, save,saveProgram,answer,changeState,stats}: {
   manual: Manual; questions: Question[]; busy: boolean; ai: boolean;
   regenerate: (imagesOnly:boolean) => void;
   save: (content:ManualContent,publish:boolean,edits?:ManualEdits) => void;
+  saveProgram:(program:ManualProgram,publish:boolean,confirmed:boolean)=>void;
+  answer:(answers:{questionId:string;answer:string}[])=>void;
+  changeState:(mode:'hold'|'unpublish')=>void;
+  stats?:{uses:number;resolved:number;unresolved:number};
 }) {
   const generating = isGenerating(manual);
   const state = manual.generation?.state;
   const [editing,setEditing] = useState(false);
   const [selectedStep,setSelectedStep] = useState(0);
+  const [selectedBlock,setSelectedBlock]=useState('');
   const sources = questions.filter(question => manual.sourceQuestionIds.includes(question.id));
-  const citations = manual.evidence?.steps[selectedStep] ?? [];
+  const block=manual.program?.blocks.find(block=>block.id===selectedBlock);
+  const citations = block?[
+    ...(manual.extraction?.facts.flatMap(fact=>fact.evidence).filter(source=>block.sourceMessageIds.includes(source.messageId))??[]),
+    ...(manual.clarification?.answers.filter(answer=>block.sourceMessageIds.includes(answer.id)).map(answer=>({messageId:answer.id,quote:answer.answer}))??[])
+  ]:manual.evidence?.steps[selectedStep] ?? [];
   const highlighted = new Set(citations.map(citation=>citation.messageId));
   const fallbackReply = sources.flatMap(source=>source.messages).filter(message=>message.role==='manager').at(-1);
   if (!highlighted.size && fallbackReply) highlighted.add(fallbackReply.id);
-  const stateLabel = generating ? state === 'illustrating' ? '手順に合わせた図解を生成中' : state==='validating' ? '原文との意味・条件の一致を照合中' : state==='analyzing' ? '確定情報と訂正を抽出中' : '会話から対処法を整理中' :
-    state === 'failed' ? '生成内容の確認が必要です' : manual.status === 'published' ? '確認済みのマニュアル' : '公開前の内容確認';
+  const stateLabel = generating ? state === 'illustrating' ? '任意の図解を生成中' : state==='validating' ? '品質と原文との一致を検証中' : state==='checking_gaps'?'重要な不足情報を確認中':state==='analyzing' ? '確定情報と訂正を抽出中' : 'ブロック構成を設計中' :
+    manual.status==='published'?'確認済みのマニュアル':manual.reviewState==='awaiting_answers'?'管理者への追加質問があります':manual.reviewState==='held'?'保留中のマニュアル':state==='failed'?'生成内容の確認が必要です':'承認待ちのマニュアル';
+  const activeStep=manual.reviewState==='awaiting_answers'?1:generating?(state==='analyzing'||state==='queued'?0:state==='checking_gaps'?1:state==='writing'?2:3):4;
   return <section className="panel flow review-panel">
     <div className="split"><div><div className="eyebrow">MANUAL STUDIO</div><h2>{stateLabel}</h2></div>
       <span className={'badge ' + (manual.status === 'published' ? 'resolved' : 'active')}>{manual.status === 'published' ? '確認済' : '未確認'}</span></div>
     <div className="generation-track" role="status" aria-live="polite">
-      {['確定情報を抽出','手順を編集','原文と照合','図解を生成','管理者が確認'].map((label,index) => <span key={label}
-        className={generating ? index === (state === 'illustrating' ? 3 : state==='validating' ? 2 : state==='writing' ? 1 : 0) ? 'progress-active' : '' : index === 4 ? 'progress-active' : 'progress-done'}>
+      {['会話を抽出','不足を確認','構成を設計','品質を検証','管理者が承認'].map((label,index) => <span key={label}
+        className={index<activeStep?'progress-done':index===activeStep?'progress-active':''}>
         <b>{index + 1}</b>{label}
       </span>)}
     </div>
     {state === 'failed' && <p className="notice">{errors[manual.generation?.error ?? 'provider-error'] ?? errors['provider-error']}</p>}
-    {manual.generation && !generating && ['queued','analyzing','writing','validating','illustrating'].includes(state ?? '') &&
+    {manual.generation && !generating && ['queued','analyzing','checking_gaps','writing','validating','illustrating'].includes(state ?? '') &&
       <p className="notice">生成が中断された可能性があります。再生成して続行できます。</p>}
+    {manual.reviewState==='awaiting_answers'&&manual.clarification&&<ClarificationForm key={'clarification-'+manual.id+manual.updatedAt} manual={manual} busy={busy} ai={ai} onAnswer={answer}/>}
+    <div className="manual-metrics"><span>版 {manual.revision??1}</span><span>利用 {stats?.uses??0}</span><span>解決 {stats?.resolved??0}</span><span>未解決 {stats?.unresolved??0}</span></div>
+    {manual.quality&&<details className="pipeline-report"><summary>品質検証・構造チェック</summary>
+      {manual.quality.report&&<p>正確性 {manual.quality.report.accurate?'✓':'要確認'} · 完全性 {manual.quality.report.complete?'✓':'要確認'} · 明瞭性 {manual.quality.report.clear?'✓':'要確認'} · 安全性 {manual.quality.report.safe?'✓':'要確認'}</p>}
+      <ul>{manual.quality.issues.map((issue,index)=><li key={index}>{issue}</li>)}</ul><p className="muted">自動修正 {manual.quality.repairs} / 2回。最終公開には管理者の確認が必要です。</p>
+    </details>}
     {manual.pipeline && <details className="pipeline-report"><summary>原文との照合：{manual.pipeline.verification==='passed' ? '一致を確認（管理者の確認が必要）' : manual.pipeline.verification==='blocked' ? '不一致・不足あり' : manual.pipeline.verification==='edited' ? '管理者が編集・AI照合対象外' : '処理中・未完了'}</summary>
       <dl><div><dt>確定情報</dt><dd>{manual.pipeline.factCount}件／訂正前として除外 {manual.pipeline.supersededCount}件</dd></div>
         <div><dt>参照した会話</dt><dd>{manual.pipeline.messageCount}発言・この現場の相談のみ</dd></div>
@@ -136,6 +159,8 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save}: {
       <button className="secondary" disabled={busy || generating || !ai || !sources.length} onClick={() => regenerate(false)}>✧ 会話から作り直す</button>
       <button className="secondary" disabled={busy || generating || !ai} onClick={() => regenerate(true)}>▧ 図解を再生成</button>
       <button className="link" disabled={generating} onClick={() => setEditing(!editing)} aria-expanded={editing}>{editing ? '編集を閉じる' : '編集する'}</button>
+      {manual.status==='published'?<button className="secondary" disabled={busy} onClick={()=>changeState('unpublish')}>非公開にする</button>:
+        <button className="secondary" disabled={busy||manual.reviewState==='held'} onClick={()=>changeState('hold')}>保留にする</button>}
     </div>
     <div className="manual-review-columns">
       <section className="review-conversation">
@@ -148,27 +173,43 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save}: {
               <strong>{message.role==='manager' ? '管理者' : 'スタッフ'}</strong><p>{message.role==='manager' ? message.originalText : message.translatedText || message.originalText}</p>
             </div>
           </article>)}
-        </div>) : <p className="muted">参照した会話がありません。</p>}</div>
+        </div>) : <p className="muted">参照した会話がありません。</p>}
+          {Boolean(manual.clarification?.answers.length)&&<div className="supplement-sources"><h4>管理者の追加情報（元のチャットとは別に保存）</h4>
+            {manual.clarification!.answers.map(answer=><article className={'source-message manager'+(highlighted.has(answer.id)?' highlighted':'')} key={answer.id}><div>
+              <strong>{answer.question}</strong><p>{answer.answer}</p><small>{new Date(answer.createdAt).toLocaleString('ja-JP')}</small></div></article>)}
+          </div>}
+        </div>
       </section>
       <section className="review-preview">
         <h3 className="review-column-heading"><span aria-hidden="true">▤</span>作成されたマニュアル（プレビュー）</h3>
-        <div className="review-preview-body"><ManualView manual={manual} language="ja" onSelectStep={setSelectedStep}/>
+        <div className="review-preview-body"><ManualView manual={manual} language="ja" onSelectStep={setSelectedStep} onSelectBlock={setSelectedBlock}/>
           {(citations.length>0 || fallbackReply) && <aside className="evidence-callout"><strong><span aria-hidden="true">↔</span> 根拠となる回答</strong>
             {(citations.length ? citations.map(source=>source.quote) : [fallbackReply!.originalText]).map((quote,index)=><blockquote key={index}>「{quote}」</blockquote>)}
           </aside>}
         </div>
       </section>
     </div>
-    {!generating && (editing ? <ManualEditor key={manual.id + manual.updatedAt} manual={manual} busy={busy} save={save}/> :
-      <ReviewApproval key={manual.id+manual.updatedAt} manual={manual} busy={busy} onEdit={()=>setEditing(true)} save={save}/>)}
+    {!generating && (editing ? manual.program?<ProgramEditor key={'editor-'+manual.id+manual.updatedAt} manual={manual} busy={busy} onSave={saveProgram}/>:<ManualEditor key={'legacy-editor-'+manual.id + manual.updatedAt} manual={manual} busy={busy} save={save}/> :
+      <ReviewApproval key={'approval-'+manual.id+manual.updatedAt} manual={manual} busy={busy} onEdit={()=>setEditing(true)} save={save} saveProgram={saveProgram}/>)}
+    {Boolean(manual.audit?.length)&&<details className="pipeline-report"><summary>編集・承認履歴</summary><ul>{[...manual.audit!].reverse().map((entry,index)=><li key={index}>v{entry.revision} · {new Date(entry.at).toLocaleString('ja-JP')} · {entry.actor} · {entry.action} · {entry.changes.join('、')}</li>)}</ul></details>}
   </section>;
 }
 
-function ReviewApproval({manual,busy,onEdit,save}: {manual:Manual; busy:boolean; onEdit:()=>void; save:(content:ManualContent,publish:boolean)=>void}) {
+function ReviewApproval({manual,busy,onEdit,save,saveProgram}: {manual:Manual; busy:boolean; onEdit:()=>void; save:(content:ManualContent,publish:boolean)=>void;saveProgram:(program:ManualProgram,publish:boolean,confirmed:boolean)=>void}) {
   const [checked,setChecked] = useState(false);
   return <div className="review-approval">
-    <label className="check"><input type="checkbox" checked={checked} onChange={event=>setChecked(event.target.checked)}/>会話・作業条件・図解の一致を確認</label>
+    <label className="check"><input type="checkbox" checked={checked} onChange={event=>setChecked(event.target.checked)}/>会話・追加情報との一致、作業条件、必要な作業権限を確認</label>
     <div className="actions"><button className="secondary" disabled={busy} onClick={onEdit}>編集する</button>
-      <button disabled={busy || !checked || manual.status==='published' || Boolean(manual.pipeline && ['pending','blocked'].includes(manual.pipeline.verification))} onClick={()=>save(manual.content,true)}>✓ 確認済にする</button></div>
+      <button disabled={busy || !checked || manual.status==='published' || manual.reviewState==='awaiting_answers' || Boolean(manual.pipeline && ['pending','blocked'].includes(manual.pipeline.verification))} onClick={()=>manual.program?saveProgram(manual.program,true,true):save(manual.content,true)}>✓ 確認済にする</button></div>
   </div>;
+}
+
+function ClarificationForm({manual,busy,ai,onAnswer}:{manual:Manual;busy:boolean;ai:boolean;onAnswer:(answers:{questionId:string;answer:string}[])=>void}){
+  const [values,setValues]=useState<Record<string,string>>({});const pending=manual.clarification!.questions;
+  return <form className="flow clarification-form" onSubmit={event=>{event.preventDefault();onAnswer(pending.map(question=>({questionId:question.id,answer:values[question.id]?.trim()??''})));}}>
+    <div className="split"><h3>Geminiからの追加質問</h3><span className="badge active">{manual.clarification!.round} / 3回</span></div>
+    <p>マニュアルの正確性・安全性・再現性のため、次の点を確認してください。回答後に再分析します。</p>
+    {pending.map(question=><label key={question.id}>{question.question}<small className="muted">{question.reason}</small><textarea required rows={3} maxLength={3000} disabled={busy||!ai} value={values[question.id]??''} onChange={event=>setValues(current=>({...current,[question.id]:event.target.value}))}/></label>)}
+    <button disabled={busy||!ai||pending.some(question=>!values[question.id]?.trim())}>回答を保存して生成を続ける</button>
+  </form>;
 }
