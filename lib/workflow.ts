@@ -8,9 +8,11 @@ import {CONTACT_TEXT,blockText,graphIssues,graphShape,programContent,programSche
 import {generationContext} from './interactive-generation';
 import {publicationHash,publicationPayload,releasedManual,publicManual} from './publication';
 import {publicationInspection,safeToPublish} from './privacy';
+import {accessPolicySchema,defaultAccess,publishableAccess} from './manual-access';
+import {digest} from './security-content';
 import {cosine,semanticHash,semanticText} from './semantic-search';
 import { isScoped, languageNames, languages, mayReadManual, mayReadQuestion, mayReuse, topic, type Language, type Manual, type Match, type Profile, type Question } from './model';
-import { deliverManual, isDemo, list, mutate,recordManualSession, resolveWithManual, setLanguage, slug, staffRecipients } from './storage';
+import { deliverManual, isDemo, list, mutate,openPublishedManual,recordManualSession, resolveWithManual, setLanguage, slug, staffRecipients } from './storage';
 
 const text = z.string().trim().min(1).max(3000);
 const location = {siteId: slug};
@@ -27,6 +29,7 @@ export const actionSchema = z.discriminatedUnion('action', [
   z.object({action:z.literal('sendManual'),...record,version:z.string().max(40),employeeIds:z.array(slug).min(1).max(50)}),
   z.object({action:z.literal('answerManual'),...record,version:z.string().max(40),answers:z.array(z.object({questionId:z.string().max(80),answer:text})).min(1).max(3)}),
   z.object({action:z.literal('manualState'),...record,version:z.string().max(40),mode:z.enum(['hold','unpublish','reject'])}),
+  z.object({action:z.literal('manualAccess'),...record,version:z.string().max(40),access:accessPolicySchema}),
   z.object({action:z.literal('saveProgram'),...record,version:z.string().max(40),program:programSchema,publish:z.boolean(),confirmPermissions:z.boolean().default(false)}),
   z.object({action:z.literal('manualSession'),...record,version:z.string().max(40),runId:z.uuid(),event:z.enum(['start','resolved','unresolved']),
     path:z.array(z.string().max(80)).max(24),text:z.string().max(3000).optional(),language:z.enum(languages)}),
@@ -47,7 +50,7 @@ function assertRole(profile: Profile, role: Profile['role']) {
 async function loadSite(profile: Profile, siteId: string) {
   const [questions, manuals] = await Promise.all([list(profile, siteId, 'questions'), list(profile, siteId, 'manuals')]);
   const scoped=manuals.filter(row=>isScoped(profile,row));
-  return {questions: newest(questions.filter(row => isScoped(profile, row))), manuals: newest(profile.role==='manager'?scoped:scoped.flatMap(row=>{const released=releasedManual(row);return released?[released]:[];}))};
+  return {questions: newest(questions.filter(row => isScoped(profile, row))), manuals: newest(profile.role==='manager'?scoped:scoped.flatMap(row=>{const released=releasedManual(row);return released&&mayReadManual(profile,released)?[released]:[];}))};
 }
 export async function workspace(profile: Profile) {
   const sites = await Promise.all(profile.siteIds.map(async siteId => {
@@ -109,7 +112,7 @@ function createDraft(question: Question): Manual {
   const createdAt = date();
   return {id: randomUUID(), organizationId: question.organizationId, siteId: question.siteId, content, translations: {},
     languages: ['ja'], sourceQuestionIds: [question.id], status: 'draft', approvedBy: null, imageUrls: [], createdAt, updatedAt: createdAt,
-    revision:1,approvedAt:null,reviewState:aiConfigured()?'pending_approval':'held',
+    access:structuredClone(defaultAccess),revision:1,approvedAt:null,reviewState:aiConfigured()?'pending_approval':'held',
     generation: {state: aiConfigured() ? 'queued' : 'failed', attemptId: randomUUID(), startedAt: createdAt,
       ...(!aiConfigured() ? {error:'not-configured'} : {})}};
 }
@@ -166,21 +169,10 @@ export async function execute(profile: Profile, input: Action) {
   }
   if (input.action === 'viewManual') {
     assertRole(profile, 'employee');
-    const manual = manuals.find(row => row.id === input.id && mayReadManual(profile, row));
-    if (!manual || manual.updatedAt !== input.version) throw new ApiError(404, 'not-found');
-    const id = createHash('sha256').update(JSON.stringify([profile.id, manual.id])).digest('hex');
-    await mutate(profile, siteId, 'manualViews', id, () => ({
-      id, employeeId: profile.id, organizationId: profile.organizationId, siteId, manualId: manual.id, version: manual.updatedAt
-    }));
-    const deliveries=(await list(profile,siteId,'manualDeliveries')).filter(row=>isScoped(profile,row) && row.employeeId===profile.id && row.manualId===manual.id && row.version===manual.updatedAt);
-    await Promise.all(deliveries.map(delivery=>mutate(profile,siteId,'manualDeliveries',delivery.id,current=>{
-      if(!current || current.employeeId!==profile.id || current.version!==manual.updatedAt)throw new ApiError(404,'not-found');
-      return {...current,readAt:current.readAt || date()};
-    })));
-    return staffManual(manual);
+    try{return staffManual(await openPublishedManual(profile,siteId,input.id,input.version));}catch{throw new ApiError(404,'not-found');}
   }
   if (input.action === 'search') {
-    const publicCandidates=manuals.flatMap(row=>{const released=releasedManual(row);return released?[released]:[];});
+    const publicCandidates=manuals.flatMap(row=>{const released=releasedManual(row);return released&&mayReadManual(profile,released)?[released]:[];});
     manuals.splice(0,manuals.length,...publicCandidates);
     const matches = candidates([], manuals);
     const localizedTitles = new Map(manuals.map(manual => [manual.id, manual.translations[input.language]?.title ?? '']));
@@ -197,7 +189,9 @@ export async function execute(profile: Profile, input: Action) {
       {question: input.text, candidates: pool.map(match => ({id: matchKey(match), question: match.title,
         procedure: manuals.find(manual => manual.id === match.id)?.program?.blocks.map(blockText)??manuals.find(manual => manual.id === match.id)?.content.steps.slice(0, 6)}))}) : null;
     const result = ids ? [...new Set(ids.ids)].flatMap(id => pool.filter(match => matchKey(match) === id)) : vectorIds?pool.slice(0,3):ranked.filter(row => row.score >= 1).slice(0,3).map(row => row.match);
-    return {matches: await Promise.all(result.map(async match => {
+    const current=await loadSite(profile,siteId);
+    const visible=result.filter(match=>current.manuals.some(row=>{const released=releasedManual(row);return released&&mayReadManual(profile,released)&&released.id===match.id&&released.updatedAt===match.version;}));
+    return {matches: await Promise.all(visible.map(async match => {
       const manual = manuals.find(row => row.id === match.id);
       const title = manual?.translations[input.language]?.title || (input.language === 'ja' ? match.title :
         await translate(match.title, 'ja', input.language, isDemo()) || match.title);
@@ -245,6 +239,16 @@ export async function execute(profile: Profile, input: Action) {
   assertRole(profile, 'manager');
   const previous = manuals.find(manual => manual.id === input.id);
   if (!previous) throw new ApiError(404, 'not-found');
+  if(input.action==='manualAccess'){
+    const recipients=await staffRecipients(profile);if(input.access.allowedUserIds.some(id=>!recipients.some(person=>person.id===id&&person.siteIds.includes(siteId))))throw new ApiError(400,'invalid-recipient');
+    return mutate(profile,siteId,'manuals',input.id,manual=>{
+      if(!manual||manual.updatedAt!==input.version)throw new ApiError(409,'stale-manual');
+      const at=date(),revision=(manual.revision??1)+1;
+      return {...manual,access:input.access,status:'draft',approvedBy:null,approvedAt:null,publicationSuppressed:true,updatedAt:at,revision,
+        reviewState:input.access.level==='RESTRICTED'?'held':'pending_approval',generation:{state:input.access.level==='RESTRICTED'?'held':'ready',attemptId:randomUUID(),startedAt:at},
+        audit:[...(manual.audit??[]),{revision,at,actor:profile.id,action:'access_changed' as const,changes:['機密レベル・閲覧権限を変更し旧公開版を停止']}].slice(-30)};
+    });
+  }
   if(input.action==='manualState')return mutate(profile,siteId,'manuals',input.id,manual=>{
     if(!manual||manual.updatedAt!==input.version)throw new ApiError(409,'stale-manual');
     const at=date(),revision=(manual.revision??1)+1;
@@ -267,11 +271,12 @@ export async function execute(profile: Profile, input: Action) {
     });after(()=>buildManual(profile,draft,source,false));return draft;
   }
   if(input.action==='saveProgram'){
+    if(input.publish&&!publishableAccess(previous))throw new ApiError(400,'restricted-manual');
     if(generationRunning(previous))throw new ApiError(409,'generation-running');
     if(input.program.language!=='ja'||graphIssues(input.program).length)throw new ApiError(400,'invalid-program');
     if(input.publish&&!input.confirmPermissions)throw new ApiError(400,'review-permissions');
     const source=questions.find(row=>previous.sourceQuestionIds.includes(row.id));if(!source)throw new ApiError(400,'source-missing');
-    const changed=JSON.stringify(previous.program)!==JSON.stringify(input.program);
+    const changed=digest(previous.program??null)!==digest(input.program);
     if(input.publish&&changed)throw new ApiError(400,'save-before-approve');
     if(input.publish&&previous.reviewState==='awaiting_answers')throw new ApiError(400,'answer-required');
     if(input.publish&&previous.pipeline&&['pending','blocked'].includes(previous.pipeline.verification))throw new ApiError(400,'review-evidence');
@@ -279,7 +284,7 @@ export async function execute(profile: Profile, input: Action) {
     const program=structuredClone(input.program);
     if(changed){
       for(const block of program.blocks){const old=previous.program?.blocks.find(old=>old.id===block.id);
-        if(JSON.stringify(old)!==JSON.stringify(block)){
+        if(digest(old??null)!==digest(block)){
           const id='edit-'+randomUUID();answers.push({id,questionId:block.id,question:input.confirmPermissions?'マニュアル編集（作業権限確認済）':'マニュアル編集',
             answer:(blockText(block)+(block.type==='branch'?'\n'+JSON.stringify(block.choices):'')).slice(0,3000),round:0,answeredBy:profile.id,createdAt:date()});
           block.sourceMessageIds=[id];if(block.type==='step'&&block.restricted)block.authorizationSourceMessageIds=input.confirmPermissions?[id]:[];
@@ -321,6 +326,7 @@ export async function execute(profile: Profile, input: Action) {
     });
   }
   if (input.action === 'regenerateManual') {
+    if(previous.access?.level==='RESTRICTED')throw new ApiError(400,'restricted-manual');
     if (!aiConfigured()) throw new ApiError(503, 'ai-not-configured');
     const question = questions.find(row => previous.sourceQuestionIds.includes(row.id));
     if (!input.imagesOnly && !question) throw new ApiError(400, 'source-missing');
@@ -336,6 +342,7 @@ export async function execute(profile: Profile, input: Action) {
     return draft;
   }
   if(previous.program)throw new ApiError(400,'use-program-editor');
+  if(input.publish&&!publishableAccess(previous))throw new ApiError(400,'restricted-manual');
   if (input.publish && input.content.steps.includes('管理者による確認が必要')) throw new ApiError(400, 'review-steps');
   if (generationRunning(previous)) throw new ApiError(409, 'generation-running');
   const translations: Manual['translations'] = {};

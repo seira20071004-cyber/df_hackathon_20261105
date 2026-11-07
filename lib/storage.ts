@@ -8,7 +8,7 @@ import { getFirestore, type CollectionReference } from 'firebase-admin/firestore
 import { z } from 'zod';
 import {preservePublication,releasedManual} from './publication';
 import { demoProfiles, seedDemo } from './demo';
-import { languages, type Profile, type Question, type Manual, type ManualView, type ManualDelivery, type StaffRecipient,type ManualUse } from './model';
+import { languages,mayReadManual, type Profile, type Question, type Manual, type ManualView, type ManualDelivery, type StaffRecipient,type ManualUse } from './model';
 
 export const isDemo = () => process.env.BRIDGE_DEMO === 'true';
 export const slug = z.string().regex(/^[a-zA-Z0-9_-]{1,120}$/);
@@ -67,7 +67,7 @@ export async function deliverManual(profile:Profile,siteId:string,manualId:strin
   const check=(manual:Manual|undefined,recipients:(Profile|undefined)[])=>{
     if(!manual || manual.organizationId!==profile.organizationId || manual.siteId!==siteId || manual.status!=='published')throw new Error('manual-not-published');
     if(manual.updatedAt!==version)throw new Error('stale-manual');
-    if(recipients.some(recipient=>!recipient || recipient.role!=='employee' || recipient.organizationId!==profile.organizationId || !recipient.siteIds.includes(siteId)))throw new Error('invalid-recipient');
+    if(recipients.some(recipient=>!recipient || recipient.role!=='employee' || recipient.organizationId!==profile.organizationId || !recipient.siteIds.includes(siteId)||!mayReadManual(recipient,manual)))throw new Error('invalid-recipient');
   };
   const create=(employeeId:string,index:number):ManualDelivery=>({id:ids[index],organizationId:profile.organizationId,siteId,manualId,version,
     employeeId,sentBy:profile.id,createdAt:new Date().toISOString(),readAt:null});
@@ -182,7 +182,7 @@ export async function recordManualSession(profile:Profile,record:ManualUse,quest
   const viewId=createHash('sha256').update(JSON.stringify([profile.id,record.manualId])).digest('hex');
   function validate(manual:Manual|undefined,view:ManualView|undefined,previous:ManualUse|undefined){
     manual=manual&&releasedManual(manual);
-    if(!manual||manual.organizationId!==profile.organizationId||manual.siteId!==siteId||manual.status!=='published'||manual.updatedAt!==record.version||!manual.program)throw new Error('manual-unavailable');
+    if(!manual||!mayReadManual(profile,manual)||manual.updatedAt!==record.version||!manual.program)throw new Error('manual-unavailable');
     if(!view||view.employeeId!==profile.id||view.version!==record.version)throw new Error('manual-unavailable');
     if(previous&&(previous.employeeId!==profile.id||previous.manualId!==record.manualId||previous.version!==record.version))throw new Error('session-conflict');
     if(record.outcome!=='started'&&!previous)throw new Error('session-not-started');
@@ -207,4 +207,17 @@ export async function recordManualSession(profile:Profile,record:ManualUse,quest
     if(question&&existingQuestion)throw new Error('session-conflict');
     tx.set(useDoc,saved);if(question&&questionDoc)tx.create(questionDoc,question);return {use:saved,question};
   });
+}
+export async function openPublishedManual(profile:Profile,siteId:string,id:string,version:string){
+ if(profile.role!=='employee'||!profile.siteIds.includes(siteId))throw new Error('manual-unavailable');
+ const viewId=createHash('sha256').update(JSON.stringify([profile.id,id])).digest('hex');
+ function checked(row:Manual|undefined){const manual=row&&releasedManual(row);if(!manual||!mayReadManual(profile,manual)||manual.updatedAt!==version)throw new Error('manual-unavailable');return manual;}
+ const view:ManualView={id:viewId,employeeId:profile.id,organizationId:profile.organizationId,siteId,manualId:id,version};
+ if(isDemo())return mutateDemo(data=>{const manual=checked(data.manuals.find(row=>row.id===id&&row.organizationId===profile.organizationId&&row.siteId===siteId));
+  const index=data.manualViews.findIndex(row=>row.id===viewId&&row.organizationId===profile.organizationId&&row.siteId===siteId);if(index<0)data.manualViews.push(view);else data.manualViews[index]=view;
+  for(const row of data.manualDeliveries)if(row.organizationId===profile.organizationId&&row.siteId===siteId&&row.employeeId===profile.id&&row.manualId===id&&row.version===version)row.readAt??=new Date().toISOString();return manual;});
+ const doc=collection(profile,siteId,'manuals').doc(id),views=collection(profile,siteId,'manualViews').doc(viewId);
+ return doc.firestore.runTransaction(async tx=>{const manual=checked((await tx.get(doc)).data());
+  const deliveries=await tx.get(collection(profile,siteId,'manualDeliveries').where('employeeId','==',profile.id));
+  tx.set(views,view);for(const row of deliveries.docs){const data=row.data();if(data.organizationId===profile.organizationId&&data.siteId===siteId&&data.manualId===id&&data.version===version&&!data.readAt)tx.update(row.ref,{readAt:new Date().toISOString()});}return manual;});
 }

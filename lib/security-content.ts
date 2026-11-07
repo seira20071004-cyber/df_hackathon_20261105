@@ -6,7 +6,7 @@ const rules:[string,'high'|'medium',RegExp][]=[
  ['private_key','high',/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?(?:-----END [^-]+-----|$)/g],
  ['credential','high',/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi],
  ['credential','high',/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g],
- ['credential','high',/(?:password|passwd|api[_ -]?key|access[_ -]?token|secret|パスワード|認証キー|アクセストークン)\s*[:=：]\s*["']?[^\s"',;\]}]{4,}/gi],
+ ['credential','high',/(?:password|passwd|api[_ -]?key|access[_ -]?token|secret|パスワード|認証キー|アクセストークン)["']?\s*[:=：]\s*["']?[^\s"',;\]}]{1,}/gi],
  ['email','medium',/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi],
  ['phone','medium',/(?<![A-Za-z0-9_-])(?:\+\d{1,3}[ -]?)?(?:\(\d{2,4}\)[ -]?|0\d{1,4}[ -]?)\d{2,4}[ -]?\d{3,4}(?![A-Za-z0-9_-])/g],
  ['address','medium',/(?:〒\s*\d{3}-?\d{4}[^\n]{0,80}|(?:東京都|北海道|京都府|大阪府|.{2,3}県)[^\s\n。]{4,80})/g],

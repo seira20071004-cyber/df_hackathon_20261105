@@ -8,6 +8,9 @@ import { RangeDiagram } from './range-diagram';
 import { ManualEditor } from './manual-editor';
 import {ManualGuide,type ManualEvent} from './manual-guide';
 import {ProgramEditor} from './program-editor';
+import {ManualAccessEditor} from './manual-access-editor';
+import type {ManualAccess} from '../lib/manual-access';
+import type {StaffRecipient} from '../lib/model';
 import type {ManualProgram} from '../lib/manual-graph';
 
 export function isGenerating(manual: Manual) {
@@ -78,6 +81,12 @@ export function ManualView({manual, language, onSelectStep,onSelectBlock,onEvent
 }
 
 const errors: Record<string,string> = {
+  'sensitive-input-blocked':'認証情報または送信禁止の機密情報を検出したため、Geminiには送信していません。元の会話を確認し、機密情報を除いた内容を手動編集してください。',
+  'restricted-manual':'RESTRICTED のマニュアルはAI生成と公開を停止しています。',
+  'secret-access-denied':'実行アカウントに対象シークレットの閲覧権限がありません。',
+  'secret-unavailable':'シークレットを取得できません。実行環境の認証と接続を確認してください。',
+  'secret-invalid':'シークレットの参照先・バージョン・内容を検証できません。',
+  'secret-manager-required':'本番のAPIキーはSecret Managerで管理してください。',
   'privacy-unavailable':'機密情報の検査を完了できないため、AIへの送信と公開を停止しました。検査サービスの設定を確認してください。',
   'sensitive-output':'AIの出力に個人情報・秘密情報が含まれる可能性があるため、公開を保留しました。',
   'rate-limited':'AIの利用回数または同時実行数の上限に達しました。時間をおいて再生成してください。',
@@ -103,8 +112,9 @@ const errors: Record<string,string> = {
   ,'generation-timeout':'生成が時間内に完了しませんでした。再生成できます。'
   ,'review-required':'品質検証または情報確認のため保留しています。下の確認事項を参照してください。'
 };
-export function ManualReview({manual, questions, busy, ai, regenerate, save,saveProgram,answer,changeState,stats}: {
+export function ManualReview({manual, questions, busy, ai, regenerate, save,saveProgram,answer,changeState,stats,staff,saveAccess}: {
   manual: Manual; questions: Question[]; busy: boolean; ai: boolean;
+  staff:StaffRecipient[];saveAccess:(access:ManualAccess)=>void;
   regenerate: (imagesOnly:boolean) => void;
   save: (content:ManualContent,publish:boolean,edits?:ManualEdits) => void;
   saveProgram:(program:ManualProgram,publish:boolean,confirmed:boolean)=>void;
@@ -132,6 +142,7 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
   return <section className="panel flow review-panel">
     <div className="split"><div><div className="eyebrow">MANUAL STUDIO</div><h2>{stateLabel}</h2></div>
       <span className={'badge ' + (manual.status === 'published' ? 'resolved' : 'active')}>{manual.status === 'published' ? '確認済' : '未確認'}</span></div>
+    <ManualAccessEditor key={manual.id+manual.updatedAt} manual={manual} staff={staff} busy={busy||generating} onSave={saveAccess}/>
     <div className="generation-track" role="status" aria-live="polite">
       {['会話を抽出','不足を確認','構成を設計','品質を検証','管理者が承認'].map((label,index) => <span key={label}
         className={index<activeStep?'progress-done':index===activeStep?'progress-active':''}>
@@ -139,7 +150,7 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
       </span>)}
     </div>
     {state === 'failed' && <p className="notice">{errors[manual.generation?.error ?? 'provider-error'] ?? errors['provider-error']}</p>}
-    {manual.publishedSnapshot&&<p className="notice">編集中の変更は未公開です。スタッフには承認済みの版 {manual.publishedSnapshot.revision??1} を表示しています。</p>}
+    {manual.publishedSnapshot&&!manual.publicationSuppressed&&<p className="notice">編集中の変更は未公開です。スタッフには承認済みの版 {manual.publishedSnapshot.revision??1} を表示しています。</p>}
     {manual.security&&<div className="notice"><strong>機密情報の検査</strong><p>{manual.security.inspection.provider==='google-dlp'?'Google Sensitive Data Protection':'ローカル簡易検査（検出は完全ではありません）'} · {manual.security.inspection.available?'検査済み':'検査を完了できませんでした・公開保留'}</p>
       {manual.security.inspection.findings.length>0&&<p>要確認：{manual.security.inspection.findings.map(finding=>`${finding.type} (${finding.count})`).join('、')}。実際の値は検査記録に残しません。</p>}</div>}
     {manual.generation && !generating && ['queued','analyzing','checking_gaps','writing','validating','illustrating'].includes(state ?? '') &&

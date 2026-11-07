@@ -1,5 +1,6 @@
 'use client';
 import {useState} from 'react';
+import {mayViewManual} from '../lib/manual-access';
 import type {Language,Manual,ManualDelivery,StaffRecipient} from '../lib/model';
 
 export function ManualSend({manual,staff,deliveries,busy,onSend}:{manual:Manual;staff:StaffRecipient[];deliveries:ManualDelivery[];busy:boolean;onSend:(ids:string[])=>Promise<void>}) {
@@ -7,7 +8,7 @@ export function ManualSend({manual,staff,deliveries,busy,onSend}:{manual:Manual;
   const [sending,setSending]=useState(false);
   const [notice,setNotice]=useState('');
   const [error,setError]=useState('');
-  const recipients=staff.filter(person=>person.siteIds.includes(manual.siteId));
+  const recipients=staff.filter(person=>mayViewManual({...person,role:'employee',organizationId:manual.organizationId,preferredLanguage:'ja'},manual));
   const history=deliveries.filter(row=>row.manualId===manual.id && row.version===manual.updatedAt);
   async function submit() {
     setSending(true);setNotice('');setError('');

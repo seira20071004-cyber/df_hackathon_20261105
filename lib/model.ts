@@ -1,4 +1,5 @@
 import type {AdditionalAnswer,ExtractedChat,GapQuestion,ManualProgram,QualityReport} from './manual-graph';
+import {mayViewManual} from './manual-access.ts';
 export const languages = ['ja', 'en', 'vi'] as const;
 export type Language = typeof languages[number];
 export type Role = 'employee' | 'manager';
@@ -49,6 +50,8 @@ export interface ManualContent {
   checks: string[];
 }
 export interface Manual {
+  access?:import('./manual-access').ManualAccess;
+  confidentiality?:import('./manual-access').ManualAccess['level'];
   id: string;
   organizationId: string;
   siteId: string;
@@ -72,7 +75,7 @@ export interface Manual {
   extraction?:ExtractedChat;
   clarification?:{round:number;questions:GapQuestion[];previousQuestions:GapQuestion[];answers:AdditionalAnswer[]};
   quality?:{report?:QualityReport;issues:string[];repairs:number};
-  audit?:{revision:number;at:string;actor:string;action:'generated'|'edited'|'published'|'unpublished'|'held'|'rejected';changes:string[]}[];
+  audit?:{revision:number;at:string;actor:string;action:'generated'|'edited'|'published'|'unpublished'|'held'|'rejected'|'access_changed';changes:string[]}[];
   embedding?:{model:string;hash:string;values:number[]};
   generation?: {
     state: 'queued' | 'analyzing' | 'checking_gaps' | 'writing' | 'validating' | 'illustrating' | 'awaiting_answers' | 'held' | 'ready' | 'failed';
@@ -163,5 +166,5 @@ export function mayReuse(question: Question) {
   return question.status === 'resolved' && question.approvedForReuse;
 }
 export function mayReadManual(profile: Profile, manual: Manual) {
-  return isScoped(profile, manual) && (profile.role === 'manager' || manual.status === 'published');
+  return mayViewManual(profile,manual);
 }

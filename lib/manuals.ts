@@ -21,6 +21,7 @@ async function buildProtectedManual(profile:Profile,draft:Manual,question:Questi
   });}
   const status=(state:NonNullable<Manual['generation']>['state'],error?:string)=>({state,attemptId,startedAt:draft.generation!.startedAt,...(error?{error}:{})});
   try{
+    if(draft.access?.level==='RESTRICTED')throw new Error('restricted-manual');
     if(imagesOnly){
       await update({generation:status('illustrating')});const image=await illustrate(draft.content.steps);
       await update({imageUrls:image.images,imageLayout:'steps',reviewState:'pending_approval',generation:status(image.images.length===draft.content.steps.length?'ready':'failed',image.error),updatedAt:new Date().toISOString()});return;
@@ -64,7 +65,7 @@ async function buildProtectedManual(profile:Profile,draft:Manual,question:Questi
     await audit({actorId:profile.id,organizationId:profile.organizationId,action:'manual_generated',result:'success',resourceId:draft.id});
   }catch(error){
     const message=error instanceof Error?error.message:'provider-error';if(message==='obsolete-attempt')return;
-    const code=['context-limit','context-scope','source-not-resolved','source-missing','not-configured','quota','prepay','access-denied','generation-timeout','invalid-json','privacy-unavailable','sensitive-output','rate-limited'].includes(message)?message:'provider-error';
+    const code=['restricted-manual','context-limit','context-scope','source-not-resolved','source-missing','not-configured','quota','prepay','access-denied','generation-timeout','invalid-json','privacy-unavailable','sensitive-input-blocked','sensitive-output','rate-limited','secret-invalid','secret-access-denied','secret-unavailable','secret-manager-required'].includes(message)?message:'provider-error';
     await update({reviewState:'held',generation:status('failed',code),updatedAt:new Date().toISOString()}).catch(()=>undefined);
     await audit({actorId:profile.id,organizationId:profile.organizationId,action:'manual_generation',result:'failed',code,resourceId:draft.id}).catch(()=>undefined);
   }

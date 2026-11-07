@@ -1,5 +1,7 @@
 # Bridge Work 2.0 セキュリティ強化・最終報告
 
+> 追補（2026-11-07）：Secret Managerの実作成・限定IAM・機密情報の送信停止・マニュアルの機密レベルは [最新の実装報告](enterprise-security.md) を参照。本書の未作成・マスク送信の記述は以前の段階のもの。
+
 ## 対象と実施範囲
 
 既存のNext.js / React / Firebase Admin / Gemini公式SDK構成を維持した。コード変更とローカルのモック検証を実施し、クラウドのAPI有効化、IAM変更、課金設定、実データ移行・削除は行っていない。変更前の深刻度別所見は [監査結果](security-audit.md) を参照。

@@ -1,10 +1,13 @@
 import type {Manual} from './model';
 import {digest} from './security-content.ts';
-export function publicationPayload(manual:Manual){return {content:manual.content,translations:manual.translations,program:manual.program??null,programTranslations:manual.programTranslations??{},figures:manual.figures??[],imageUrls:manual.imageUrls,languages:manual.languages};}
+import {manualAccess,publishableAccess} from './manual-access.ts';
+export function publicationPayload(manual:Manual){return {access:manualAccess(manual)??null,content:manual.content,translations:manual.translations,program:manual.program??null,programTranslations:manual.programTranslations??{},figures:manual.figures??[],imageUrls:manual.imageUrls,languages:manual.languages};}
 export const publicationHash=(manual:Manual)=>digest(publicationPayload(manual));
 export function releasedManual(manual:Manual):Manual|undefined{
+ if(manual.publicationSuppressed)return;
  const released=manual.status==='published'?manual:manual.publishedSnapshot;
  if(!released||released.organizationId!==manual.organizationId||released.siteId!==manual.siteId||released.id!==manual.id||released.status!=='published'||!released.approvedBy)return;
+ if(!publishableAccess(released))return;
  if(process.env.BRIDGE_DEMO!=='true'&&(!released.security?.inspection?.complete||released.security.inspection.findings.length||!released.security.inspection.available||released.security.contentHash!==publicationHash(released)))return;
  return released;
 }
@@ -19,6 +22,6 @@ export function publicManual(manual:Manual):Manual{
  // Explicit allowlist: newly added internal fields never leak automatically.
  const guide=(program:NonNullable<Manual['program']>)=>({...program,blocks:program.blocks.map(block=>({...block,sourceMessageIds:[],...(block.type==='step'?{authorizationSourceMessageIds:[]}:{})}))});
  return {id:manual.id,organizationId:manual.organizationId,siteId:manual.siteId,content:manual.content,translations:manual.translations,languages:manual.languages,
-  sourceQuestionIds:[],status:'published',approvedBy:null,imageUrls:manual.imageUrls,createdAt:manual.createdAt,updatedAt:manual.updatedAt,
+  sourceQuestionIds:[],status:'published',approvedBy:null,imageUrls:manual.imageUrls,createdAt:manual.createdAt,updatedAt:manual.updatedAt,confidentiality:manualAccess(manual)?.level??'RESTRICTED',
   revision:manual.revision,...(manual.program?{program:guide(manual.program)}:{}),...(manual.programTranslations?{programTranslations:Object.fromEntries(Object.entries(manual.programTranslations).map(([language,program])=>[language,guide(program!)]))}:{}),...(manual.figures?{figures:manual.figures}:{}),...(manual.imageLayout?{imageLayout:manual.imageLayout}:{})};
 }

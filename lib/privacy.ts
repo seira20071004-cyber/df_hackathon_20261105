@@ -37,6 +37,11 @@ export async function inspectContent(value:unknown,{mask=false,cloudInspect=insp
  const report:Inspection={provider:process.env.BRIDGE_SENSITIVE_PROVIDER==='google-dlp'?'google-dlp':'local',available,complete,findings:summarizeFindings(findings)};
  return {value:result,report};
 }
-export async function protectAiData<T>(data:T):Promise<T>{const checked=await inspectContent(data,{mask:true});if(!checked.report.available)throw new Error('privacy-unavailable');return checked.value as T;}
+export async function protectAiData<T>(data:T,options:Parameters<typeof inspectContent>[1]={}):Promise<T>{
+ // Credentials and explicitly confidential content are prohibited, even if masking is possible.
+ if(textValues(data).some(text=>localInspect(text).findings.some(finding=>finding.risk==='high')))throw new Error('sensitive-input-blocked');
+ const checked=await inspectContent(data,{...options,mask:true});if(!checked.report.available)throw new Error('privacy-unavailable');
+ if(checked.report.findings.some(finding=>['AUTH_TOKEN','PASSWORD'].includes(finding.type)))throw new Error('sensitive-input-blocked');return checked.value as T;
+}
 export async function publicationInspection(value:unknown){const checked=await inspectContent(value);return checked.report;}
 export function safeToPublish(report:Inspection){return report.available&&(!strictPrivacy()||report.complete)&&report.findings.length===0;}
