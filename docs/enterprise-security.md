@@ -100,6 +100,7 @@ App Checkの公開識別子・強制設定とレート制限は `.env.example` /
 - ローカルdev APIの読み取り中心スモーク：5件成功。
 - `npm audit --omit=dev --audit-level=high`：0件。
 - Git全参照の履歴中の188ファイルオブジェクトを検査。現在設定中のキーの完全一致0件、代表的なGoogle/GitHubキー・秘密鍵形式0件。未知の形式やチャット中の露出まで保証する検査ではない。
+- 最新UIを読み込んだ開発用ブラウザーバンドル23件でも、サーバー秘密設定・Admin Auth SDK・秘密鍵のマーカー検出0件。
 - ブラウザーで管理者画面の機密レベルとスタッフ選択の表示を確認。画面確認だけでは既存データの権限を変更していない。
 - 本番ビルド：コンパイルとTypeScript検査は成功。静的ページ生成時、Windowsが `.next/server/app/_not-found.segments/_not-found` のmkdirをEPERMで拒否して失敗。本番ビルド完了・本番起動・既存production APIテスト一式の最新ソースでの成功は報告しない。
 
@@ -124,6 +125,6 @@ Secret Managerの実行環境接続、本番Firebase/Firestore/DLP/Vertex/App Ch
 5. App Checkを登録ドメインで検証してから強制する。実トークンがない段階で強制して全利用者を締め出さない。
 6. 既存マニュアルの機密レベルを管理者が確認して再承認し、ログ保持・コスト・バックアップを決める。
 
-GitHub連携はこれまでの書き込みで403となっている。ローカルコミットと配布用ZIPを用意し、成功が確認できない限りGitHub反映済みとは扱わない。
+GitHub連携はこれまでの書き込みで403となっている。今回もGit CLIでpushを試みたが、実行環境がcredential-managerの起動を拒否し認証情報を取得できず失敗した。ローカルコミットと配布用ZIPを用意した。GitHub反映は未完了。
 
 公式資料：[Secret Managerバージョン取得・CRC32C検証](https://docs.cloud.google.com/secret-manager/docs/access-secret-version)、[IAMによるアクセス制御](https://docs.cloud.google.com/secret-manager/docs/access-control)、[Cloud Runでのシークレット利用](https://docs.cloud.google.com/run/docs/configuring/services/secrets)。
