@@ -7,6 +7,7 @@ export function manualAccess(manual:Manual):ManualAccess|undefined{if(!manual.ac
 export function mayViewManual(profile:Profile,manual:Manual){
  if(profile.organizationId!==manual.organizationId||!profile.siteIds.includes(manual.siteId))return false;
  if(profile.role==='manager')return true;
+ if(manual.sourceDocument&&!manual.sourceDocument.share)return false;
  const policy=manualAccess(manual);if(manual.status!=='published'||!policy||policy.level==='RESTRICTED'||!policy.allowedRoles.includes(profile.role))return false;
  return policy.level!=='CONFIDENTIAL'||policy.allowedUserIds.includes(profile.id);
 }

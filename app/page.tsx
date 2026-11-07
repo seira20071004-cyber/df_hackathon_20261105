@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import { copy } from '../lib/copy';
 import { ManualReview, ManualView, isGenerating } from './manual';
 import {ManualInbox,ManualSend} from './manual-delivery';
+import {DocumentLibrary} from './document-library';
 import {AdaptiveIntake} from './adaptive-intake';
 import type {AdaptiveDetails} from '../lib/adaptive';
 import {OrganizationEntry,type GoogleConfig} from './organization-entry';
@@ -148,7 +149,19 @@ export default function BridgeWork() {
   const reviewManual = manual?.status === manualStatus ? manual : manuals.find(row=>row.status===manualStatus);
   const deliveries=data?.deliveries.filter(row=>row.siteId===site) ?? [];
   const unread=manager?0:deliveries.filter(row=>!row.readAt).length;
-  const send = <T,>(payload: object) => request<T>(token, {siteId:site,...payload});
+  const send=useCallback(<T,>(payload:object)=>request<T>(token,{siteId:site,...payload}),[request,token,site]);
+  async function downloadSource(id:string,guide?:Manual,page?:number){
+    const suffix='?sourcePdf='+id+'&site='+encodeURIComponent(site)+(guide?'&manual='+encodeURIComponent(guide.id)+'&version='+encodeURIComponent(guide.updatedAt):'')+(page?'&page='+page:'');
+    const response=await bridgeFetch(suffix,{headers:{Authorization:'Bearer '+token}});
+    if(!response.ok)throw new Error('document-download-failed');
+    const url=URL.createObjectURL(await response.blob());const anchor=document.createElement('a');anchor.href=url;anchor.download=page?'source-p'+page+'.pdf':'source.pdf';anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
+  function sourceLink(guide:Manual){const source=guide.sourceDocument;if(!source?.share)return null;
+    const pages=[...new Set(source.references.flatMap(ref=>Array.from({length:ref.pageEnd-ref.pageStart+1},(_,i)=>ref.pageStart+i)))].sort((a,b)=>a-b);
+    return <div className="actions">{pages.map(page=><button key={page} className="secondary" type="button" disabled={busy} onClick={()=>run(()=>downloadSource(source.id,guide,page))}>
+      {{ja:'原本PDF',en:'Source PDF',vi:'PDF nguồn'}[language]} · {page}
+    </button>)}</div>;
+  }
   function readManual(target:Manual) {
     run(async()=>{await send({action:'viewManual',id:target.id,version:target.updatedAt});await refresh(token);openManual(target.id);});
   }
@@ -232,7 +245,7 @@ export default function BridgeWork() {
               {!manual&&<><div className="eyebrow">{siteName(match.siteId)} · {t(match.kind === 'manual' ? 'manuals' : 'cases')}</div><h3>{match.title}</h3></>}
               {manual?.id === match.id ? <>
                 <ManualView manual={manual} language={language} onEvent={manualEvent(manual)} contextText={[query,...intake.map(row=>row.text)].join('\n')}/>
-                {reportGuide(manual)}
+                {sourceLink(manual)}{reportGuide(manual)}
                 {!manual.program&&<button className="secondary" disabled={busy} onClick={() => ask(match)}>{t('selfResolve')}</button>}
               </> : <><p>{t('manualFits')}</p><div className="actions">
                 <button className="guide-open" disabled={busy} onClick={() => run(async () => {
@@ -317,6 +330,7 @@ export default function BridgeWork() {
         </>}
         {tab === 'manuals' && <>
           {manager ? <>
+            <DocumentLibrary key={site} site={site} demo={data.demo} busy={busy} send={send} download={downloadSource} openManual={async guide=>{await refresh(token);setManualStatus('draft');setManualId(guide.id);}}/>
             <section className="panel flow">
               <h2>マニュアル確認</h2>
               <div className="manual-status-tabs" role="tablist" aria-label="確認状態">
@@ -357,7 +371,7 @@ export default function BridgeWork() {
                 <span className="tile">▤</span><span className="row-text"><strong>{(row.translations[language] ?? row.content).title}</strong><small>{siteName(row.siteId)}</small></span>
                 <span>›</span></button>)}</div> : <p className="empty">{t('empty')}</p>}
             </section>
-            {manual&&<><ManualView manual={manual} language={language} onEvent={manualEvent(manual)}/>{reportGuide(manual)}</>}
+            {manual&&<><ManualView manual={manual} language={language} onEvent={manualEvent(manual)}/>{sourceLink(manual)}{reportGuide(manual)}</>}
           </>}
         </>}
         <footer>Bridge Work <span>·</span> {siteName(site)}</footer>

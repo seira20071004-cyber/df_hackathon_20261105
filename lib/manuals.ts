@@ -1,4 +1,4 @@
-import {generate,generateChecked,illustrate} from './ai';
+import {aiProvider,generate,generateChecked,illustrate} from './ai';
 import type {Manual,Profile,Question} from './model';
 import {list,mutate,siteSafety} from './storage';
 import {knowledgeSchema} from './adaptive';
@@ -38,7 +38,7 @@ async function buildProtectedManual(profile:Profile,draft:Manual,question:Questi
     if(!source?.approvedBy||!source.context||!coversAnswers(source,rawAnswers))throw new Error('source-review-required');
     const context=source.context,answers=rawAnswers.map(answer=>({...answer,answer:context.sources.find(row=>row.id===answer.id)!.text})),hash=digest(context),bytes=Buffer.byteLength(JSON.stringify(context));
     let pipeline:NonNullable<Manual['pipeline']>={promptVersion:INTERACTIVE_PROMPT_VERSION,contextHash:hash,contextBytes:bytes,messageCount:context.sources.length,
-      provider:process.env.GEMINI_PROVIDER==='vertex'?'vertex':'developer',model:process.env.GEMINI_MODEL||'gemini-2.5-flash',verification:'pending',issues:[],factCount:0,supersededCount:0};
+      provider:aiProvider(),model:process.env.GEMINI_MODEL||'gemini-2.5-flash',verification:'pending',issues:[],factCount:0,supersededCount:0};
     await update({pipeline});
     const safety=await siteSafety(profile,draft.siteId);
     const classified=await classifyConsultation(context.sources.filter(row=>row.role!=='system').map(row=>({id:row.id,text:row.text})),context.originalLanguage,safety?.keywords);

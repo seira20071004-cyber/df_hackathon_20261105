@@ -47,10 +47,7 @@ AIへの送信ではユーザーID・送信者名フィールドを省き、メ�
 
 | 変数 | 内容 |
 |---|---|
-| `GEMINI_PROVIDER` | `developer` または `vertex` |
-| `GEMINI_API_KEY` | Developer API / 対応するVertex認証用キー。ADC利用時は不要 |
-| `GOOGLE_CLOUD_PROJECT` | Vertex利用時のプロジェクト |
-| `GEMINI_VERTEX_AUTH` | ADC利用時は `adc`。Cloud Runでは実行用サービスアカウント推奨 |
+| `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` | Vertex AI のプロジェクトとロケーション。Cloud Run の実行用サービスアカウントで ADC を利用 |
 | `GEMINI_MODEL` | 生成・翻訳用。既定 `gemini-2.5-flash` |
 | `GEMINI_REVIEW_MODEL` | 品質検証用の任意モデル。未設定なら同じモデル |
 | `GEMINI_GENERATE_IMAGES` | 既定無効。`true` のときのみ任意の図解生成を追加 |

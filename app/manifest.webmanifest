@@ -1,0 +1,15 @@
+{
+  "id": "/",
+  "name": "Bridge Work 2.0",
+  "short_name": "Bridge Work",
+  "description": "多言語の職場相談とナレッジ共有",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f7fc",
+  "theme_color": "#1745df",
+  "icons": [
+    {"src": "/bridge-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "/bridge-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}

@@ -13,7 +13,7 @@ export function createBridgeTransport({fetcher,loadTokenSource,timeoutMs=15000}:
   }catch{throw new Error('app-check-unavailable');}
  }
  return async function bridgeFetch(suffix='',init:RequestInit={}){
-  if(!['','?config','?login','?onboard','?invite'].includes(suffix))throw new Error('invalid-api-route');
+  if(!['','?config','?login','?onboard','?invite'].includes(suffix)&&!/^\?sourcePdf=[a-f0-9]{64}&site=[A-Za-z0-9_-]{1,120}(?:&manual=[A-Za-z0-9_-]{1,120}&version=[A-Za-z0-9%:._-]{1,120})?(?:&page=(?:[1-9]|10))?$/.test(suffix))throw new Error('invalid-api-route');
   if(suffix==='?config')return Response.json(await config());
   const send=async(force:boolean)=>{const outgoing=new Headers(init.headers);const proof=await headers(force);for(const [key,value] of Object.entries(proof))outgoing.set(key,value);return fetcher('/api/bridge'+suffix,{...init,credentials:'same-origin',cache:'no-store',headers:outgoing});};
   const response=await send(false);

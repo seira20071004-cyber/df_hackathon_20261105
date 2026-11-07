@@ -39,18 +39,19 @@ export async function setDisplayName(profile:Profile,name:string){
 export async function setLanguage(profile: Profile, preferredLanguage: Profile['preferredLanguage']) {
   if (!isDemo()) await getFirestore(bridgeAdmin()).collection('users').doc(profile.id).update({preferredLanguage});
 }
-type Records = {questions: Question; manuals: Manual; manualViews: ManualView; manualDeliveries:ManualDelivery;manualUses:ManualUse};
+type Records = {sourceDocuments:import('./document-types').SourceDocument;questions: Question; manuals: Manual; manualViews: ManualView; manualDeliveries:ManualDelivery;manualUses:ManualUse};
 type Table = keyof Records;
 type DemoState = {[K in Table]: Records[K][]};
-const folder = process.env.BRIDGE_DEMO_DATA_DIR || '.bridge-work';
+export const demoDataFolder = process.env.BRIDGE_DEMO_DATA_DIR || '.bridge-work';
+const folder=demoDataFolder;
 const demoFile = join(folder, 'data.json');
 let pending = Promise.resolve();
 async function readDemo(): Promise<DemoState> {
   try {
-    return {manualViews: [], manualDeliveries:[],manualUses:[], ...JSON.parse(await readFile(demoFile, 'utf8'))};
+    return {sourceDocuments:[],manualViews: [], manualDeliveries:[],manualUses:[], ...JSON.parse(await readFile(demoFile, 'utf8'))};
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    return {...seedDemo(), manualViews: [],manualDeliveries:[],manualUses:[]};
+    return {...seedDemo(),sourceDocuments:[], manualViews: [],manualDeliveries:[],manualUses:[]};
   }
 }
 export async function siteSafety(profile:Profile,siteId:string){

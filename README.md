@@ -39,16 +39,16 @@ npm run dev
 | `FIREBASE_PROJECT_ID` | Firebase プロジェクト ID |
 | `FIREBASE_WEB_API_KEY` | Firebase Authentication の Web API キー |
 | `GOOGLE_APPLICATION_CREDENTIALS` | ローカル ADC にサービスアカウントを使用する場合の JSON ファイルの絶対パス。Google Cloud の実行環境では、権限を設定した実行用サービスアカウントを利用可能 |
-| `GEMINI_API_KEY` | サーバーが Gemini API を呼び出すキー |
+| `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` | サーバーが ADC で呼ぶ Vertex AI のプロジェクトとロケーション |
 | `GEMINI_MODEL` | Gemini モデル名。既定値は `gemini-2.5-flash` |
 
 1. Firebase で Cloud Firestore を作成し、Authentication のメール／パスワード認証を有効にします。Firebase Authentication に従業員と管理者を作成します。
 2. Firestore の `users/{Firebase Auth UID}` に各アカウントのプロフィールを作成します。例は `{"name":"Linh Nguyễn","role":"employee","preferredLanguage":"vi","organizationId":"company","siteIds":["sakura"]}` です。管理者の `role` は `manager`、対応言語は `ja`、`en`、`vi` です。組織・現場の割り当ては Firebase 管理者が設定します。
 3. サーバーに Firebase Admin SDK 用の ADC を設定します。サービスアカウントには Firestore の読み書きと Firebase Auth のユーザー状態確認権限を付与します。設定ファイルやキーは Git 管理外に保管します。
 4. Firebase CLI で `firebase deploy --only firestore:rules --project <project-id>` を実行します。ブラウザから Firestore へは直接アクセスせず、サーバーが Firebase ID トークン、役割、組織、現場、所有者を検証します。相談・マニュアルは `organizations/{organizationId}/sites/{siteId}` 配下に分離し、チャットは相談と同じドキュメントで更新します。
-5. `.env.local` の Firebase 設定を記入して `BRIDGE_DEMO=false` に変更し、Gemini を使う場合はキーも追加して再起動します。Firebase モードでは架空のデータを自動投入しません。
+5. `.env.local` の Firebase 設定を記入して `BRIDGE_DEMO=false` に変更し、Gemini を使う場合は Vertex AI の設定も追加して再起動します。Firebase モードでは架空のデータを自動投入しません。
 
-Gemini を有効にすると翻訳、要約、マニュアルの意味検索、会話からのマニュアル生成、確認時の英語・ベトナム語訳が動作します。検索対象は同じ現場の確認済みマニュアルです。スタッフが質問時に候補の適合性を確認して開くと、そのスタッフのマニュアル一覧に残ります。API エラー時は元のメッセージを表示し、検索は作業カテゴリと文字の類似度で続行します。キーなしのデモでは定型の質問・回答に参考訳が付き、自由文の翻訳には Gemini キーが必要です。
+Gemini を有効にすると翻訳、要約、マニュアルの意味検索、会話からのマニュアル生成、確認時の英語・ベトナム語訳が動作します。検索対象は同じ現場の確認済みマニュアルです。スタッフが質問時に候補の適合性を確認して開くと、そのスタッフのマニュアル一覧に残ります。API エラー時は元のメッセージを表示し、検索は作業カテゴリと文字の類似度で続行します。ローカルデモは模擬応答で確認できます。企業PDFの取り込みとクラウド設定は [セットアップ手順](docs/enterprise-pdf.md) を参照してください。
 
 実装参照 [Firebase ID トークンの検証](https://firebase.google.com/docs/auth/admin/verify-id-tokens) · [Gemini 構造化出力](https://ai.google.dev/gemini-api/docs/generate-content/structured-output)
 

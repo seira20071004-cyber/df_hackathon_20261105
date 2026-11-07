@@ -6,6 +6,7 @@ import {createServer} from 'node:net';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import test from 'node:test';
+import {PDFDocument} from 'pdf-lib';
 import {seedDemo} from '../lib/demo.ts';
 
 test('SDK pipeline, supplements, approval, sessions and escalation remain scoped and durable',{timeout:120000},async t=>{
@@ -31,6 +32,35 @@ test('SDK pipeline, supplements, approval, sessions and escalation remain scoped
   const before=Date.now();await api('linh',{action:'resolve',id});assert.ok(Date.now()-before<2000,'Resolution must not wait for Gemini');await api('linh',{action:'resolve',id});
   const matches=(await api('sato')).manuals.filter(manual=>manual.sourceQuestionIds.includes(id));assert.equal(matches.length,1);assert.equal(matches[0].program,undefined);await approve(matches[0].id);return {id,manual:matches[0]};}
  async function completed(id){let manual;for(let i=0;i<150;i++){manual=(await api('sato')).manuals.find(row=>row.id===id);if(['ready','failed','held','awaiting_answers'].includes(manual.generation?.state))return manual;await new Promise(resolve=>setTimeout(resolve,100));}assert.fail(JSON.stringify(manual)+'\n'+log);}
+ const pdf=await readFile(join(root,'public','sample-work-manual.pdf'));
+ const upload={action:'uploadPdf',filename:'sample.pdf',data:pdf.toString('base64'),classification:'internal',share:true};
+ await api('linh',upload,403);await api('sato',{...upload,data:Buffer.from('not a pdf').toString('base64')},400);
+ const sourcePdf=await api('sato',upload);assert.equal(sourcePdf.pageCount,1);await api('sato',upload,409);
+ await api('sato',{action:'processPdf',id:sourcePdf.id},403);
+ await api('sato',{action:'documentPermission',id:sourcePdf.id,allowed:true});
+ await api('sato',{action:'processPdf',id:sourcePdf.id});
+ let imported;for(let i=0;i<60;i++){imported=(await api('sato',{action:'documentList'})).find(row=>row.id===sourcePdf.id);if(imported.state!=='processing')break;await new Promise(resolve=>setTimeout(resolve,120));}
+ assert.equal(imported.state,'ready',JSON.stringify(imported));assert.ok(imported.chunks[0].figure);assert.ok(imported.candidates.length);
+ const importedManual=await api('sato',{action:'materializePdf',id:sourcePdf.id,index:0,kind:'candidate'});
+ await api('linh',{action:'viewManual',id:importedManual.id,version:importedManual.updatedAt},404);
+ const publishedPdf=await api('sato',{action:'saveProgram',id:importedManual.id,version:importedManual.updatedAt,program:importedManual.program,publish:true,confirmPermissions:true});
+ const publishedSearch=await api('linh',{action:'adaptiveSearch',text:'入口マットの確認',language:'ja',answers:[]});assert.ok(publishedSearch.matches.some(row=>row.id===publishedPdf.id));
+ const pdfUrl=url+'?sourcePdf='+sourcePdf.id+'&site=sakura';
+ assert.equal((await fetch(pdfUrl,{headers:{Authorization:'Bearer linh'}})).status,404);
+ const download=await fetch(pdfUrl+'&manual='+publishedPdf.id+'&version='+encodeURIComponent(publishedPdf.updatedAt),{headers:{Authorization:'Bearer linh'}});
+ assert.equal(download.status,200);assert.deepEqual(Buffer.from(await download.arrayBuffer()),pdf);
+ const sourcePage=pdfUrl+'&manual='+publishedPdf.id+'&version='+encodeURIComponent(publishedPdf.updatedAt);
+ const onePage=await fetch(sourcePage+'&page=1',{headers:{Authorization:'Bearer linh'}});assert.equal(onePage.status,200);assert.match(onePage.headers.get('content-disposition'),/source-p1\.pdf/);
+ assert.equal((await fetch(sourcePage+'&page=2',{headers:{Authorization:'Bearer linh'}})).status,404);
+ await api('sato',{action:'deletePdf',id:sourcePdf.id},409);
+ const confidential=await PDFDocument.create();confidential.addPage();
+ const privatePdf=await api('sato',{...upload,classification:'confidential',data:Buffer.from(await confidential.save()).toString('base64')});
+ assert.equal(privatePdf.share,false);
+ await api('sato',{action:'documentPermission',id:privatePdf.id,allowed:true},403);
+ await api('sato',{action:'deletePdf',id:privatePdf.id});
+ assert.equal((await api('sato',{action:'documentList'})).some(row=>row.id===privatePdf.id),false);
+ assert.equal((await fetch(url+'?sourcePdf='+privatePdf.id+'&site=sakura',{headers:{Authorization:'Bearer sato'}})).status,404);
+ assert.equal((await fetch(url+'?sourcePdf='+sourcePdf.id+'&site=outside',{headers:{Authorization:'Bearer sato'}})).status,404);
  const blocked=await api('linh',{action:'adaptiveSearch',text:'薬品がこぼれた',language:'ja',answers:[]});assert.equal(blocked.adaptive.mode,'safety');assert.deepEqual(blocked.matches,[]);
  const adaptive=await api('linh',{action:'adaptiveSearch',text:'Tôi không thể quét mã vạch.',language:'vi',answers:[]});assert.equal(adaptive.adaptive.analysis.primary,'troubleshooting');assert.ok(adaptive.matches.some(row=>row.id==='demo-interactive-manual'));assert.ok(!adaptive.matches.some(row=>row.id==='foreign-manual'));
  const assignedId=randomUUID();await api('linh',{action:'ask',id:assignedId,text:'担当者テスト',language:'ja'});

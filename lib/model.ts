@@ -82,6 +82,8 @@ export interface Manual {
   security?:{contentHash:string;inspection:import('./security-content').Inspection;checkedAt:string};
   consultationType?:import('./adaptive').ConsultationType;
   riskLevel?:import('./adaptive').Risk;
+  sourceDocument?:{id:string;share:boolean;references:import('./document-types').PdfReference[];conditions?:string;exclusions?:string};
+  authored?:boolean;
   protectedSource?:import('./protected-source').ProtectedSource;
   program?:ManualProgram;
   programTranslations?:Partial<Record<Language,ManualProgram>>;

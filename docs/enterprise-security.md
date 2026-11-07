@@ -69,20 +69,19 @@ Consoleの作成とIAM付与まで実施済みであり、Cloud Runからの取�
 
 ## 7. 環境変数
 
-推奨するVertex本番構成：
+現在の本番接続は Vertex AI + ADC。企業PDFのセットアップは [企業PDFの取り込み](enterprise-pdf.md) を参照。
 
 ```dotenv
 BRIDGE_DEMO=false
-GEMINI_PROVIDER=vertex
-GEMINI_VERTEX_AUTH=adc
 GOOGLE_CLOUD_PROJECT=YOUR_PRODUCTION_PROJECT
+GOOGLE_CLOUD_LOCATION=YOUR_VERTEX_LOCATION
 FIREBASE_PROJECT_ID=YOUR_FIREBASE_PROJECT
 BRIDGE_SENSITIVE_PROVIDER=google-dlp
 BRIDGE_DLP_PROJECT=YOUR_INSPECTION_PROJECT
 BRIDGE_PRIVACY_STRICT=true
 ```
 
-Developer APIを使う本番では `GEMINI_PROVIDER=developer` とし、`GEMINI_API_KEY_SECRET=projects/PROJECT_NUMBER/secrets/bridge-work-gemini-api-key-prod/versions/1` を指定する。代わりにCloud Runでマウントした絶対パスを `GEMINI_API_KEY_FILE` に設定してもよい。秘密値を環境変数やNEXT_PUBLIC変数に書かない。モデルは既存 `GEMINI_MODEL` / `GEMINI_REVIEW_MODEL` で変更可能。
+過去の構成（現在は本番で未使用）：Developer APIを使う場合は `GEMINI_PROVIDER=developer` とし、`GEMINI_API_KEY_SECRET=projects/PROJECT_NUMBER/secrets/bridge-work-gemini-api-key-prod/versions/1` を指定する。代わりにCloud Runでマウントした絶対パスを `GEMINI_API_KEY_FILE` に設定してもよい。秘密値を環境変数やNEXT_PUBLIC変数に書かない。モデルは既存 `GEMINI_MODEL` / `GEMINI_REVIEW_MODEL` で変更可能。
 
 App Checkの公開識別子・強制設定とレート制限は `.env.example` / `app-check-setup.md` を参照。Firebase Web APIキーは公開設定であり、Gemini秘密キーと共用しない。
 

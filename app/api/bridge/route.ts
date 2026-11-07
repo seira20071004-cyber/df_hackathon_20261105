@@ -1,7 +1,9 @@
+import {z} from 'zod';
 import {NextRequest,NextResponse} from 'next/server';
 import {getAppCheck} from 'firebase-admin/app-check';
 import {applicationDefault,getApps,initializeApp} from 'firebase-admin/app';
-import {authenticate,isDemo} from '../../../lib/storage';
+import {documentDownload} from '../../../lib/documents';
+import {authenticate,isDemo,slug} from '../../../lib/storage';
 import {actionSchema,ApiError,execute,workspace} from '../../../lib/workflow';
 import {audit,loginLimit,requestLimit,SecurityError,securityContext} from '../../../lib/security-runtime';
 import type {Profile} from '../../../lib/model';
@@ -58,6 +60,14 @@ async function run(request:NextRequest){
    const result=await issueInvitation(profile,input.data);await audit({actorId:profile.id,organizationId:profile.organizationId,action:operation,result:'success'});return reply(result);
   }
   return await securityContext.run(profile,async()=>{
+   if(request.method==='GET'&&request.nextUrl.searchParams.has('sourcePdf')){
+    const input=z.object({site:slug,id:z.string().regex(/^[a-f0-9]{64}$/),manual:slug.optional(),version:z.string().max(40).optional(),page:z.string().regex(/^(?:[1-9]|10)$/).transform(Number).optional()}).safeParse({site:request.nextUrl.searchParams.get('site'),id:request.nextUrl.searchParams.get('sourcePdf'),manual:request.nextUrl.searchParams.get('manual')??undefined,version:request.nextUrl.searchParams.get('version')??undefined,page:request.nextUrl.searchParams.get('page')??undefined});
+    if(!input.success)throw new SecurityError(400,'invalid-input');
+    operation='document_download';resourceId=input.data.id;
+    const {data,filename}=await documentDownload(profile!,input.data.site,input.data.id,input.data.manual,input.data.version,input.data.page);
+    await audit({actorId:profile!.id,organizationId:profile!.organizationId,action:operation,resourceId,result:'success'});
+    return new NextResponse(new Uint8Array(data),{headers:{'Content-Type':'application/pdf','Content-Disposition':"attachment; filename*=UTF-8''"+encodeURIComponent(filename),'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
+   }
    if(request.method==='GET')return reply(await workspace(profile!));
    const raw=await readJson(request,2_400_000),input=actionSchema.safeParse(raw);if(!input.success||Object.keys(raw).some(key=>!Object.hasOwn(input.data,key)))throw new SecurityError(400,'invalid-input');
    operation=input.data.action;resourceId='id' in input.data?input.data.id:undefined;

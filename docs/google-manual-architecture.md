@@ -61,7 +61,7 @@ flowchart TD
 | Cloud Storage | 生成画像を保存・版ごとに管理 | 次の本番化項目。現在は容量を制限した画像をマニュアルに保持 |
 | Cloud Logging | 生成ステージ・遅延・失敗率の記録 | 次の本番化項目。会話本文やキーをログに出さない設計とする |
 
-Cloud Runでは実行サービスアカウントのADCを使う認証経路を実装済みです。`GEMINI_PROVIDER=vertex`、`GEMINI_VERTEX_AUTH=adc`、`GOOGLE_CLOUD_PROJECT`を指定します。IAM、ADC、本番サービスの接続検証は別途必要です。今回キー発行や請求設定は変更していません。
+Cloud Runでは実行サービスアカウントのADCを使う認証経路を実装済みです。`GOOGLE_CLOUD_PROJECT` と `GOOGLE_CLOUD_LOCATION` を指定します。IAM、ADC、本番サービスの接続検証は別途必要です。今回キー発行や請求設定は変更していません。
 
 Firestoreでは解決と未確認マニュアル作成を同じトランザクションで行います。Cloud Tasks導入時は、この同じトランザクション内でジョブのoutboxも保存し、別の処理でenqueueします。DB保存後のenqueue失敗による生成漏れを防ぐためです。ワーカーは試行IDで冪等にし、各ステージの結果を保存して再開できる構成にします。現時点ではプロセス停止時の自動再開はなく、管理者による再生成が必要です。
 
