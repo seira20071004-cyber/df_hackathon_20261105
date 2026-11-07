@@ -54,7 +54,7 @@ export function WorkspaceShell({profile,language,tab,unread,demo,onNavigate,onSi
       <button ref={menuButton} type="button" className="shell-icon" aria-label={text.menu} aria-expanded={menu} aria-controls="workspace-drawer" onClick={()=>{setAccount(false);setMenu(!menu);}}><Icon name="menu"/></button>
       <span className="shell-brand">Bridge<span>Work</span></span><span className="shell-separator"/><strong>{name(tab)}</strong>
     </div><div className="workspace-topright">{demo&&<span className="badge demo shell-demo">{t('demo')}</span>}
-      <div className="account-control"><button ref={accountButton} type="button" className="account-circle" aria-label={text.account} aria-expanded={account} aria-controls="account-popover" onClick={()=>{setMenu(false);setAccount(!account);}}><Icon name="person"/></button>
+      <div className="account-control"><button ref={accountButton} type="button" className="account-circle" aria-label={text.account} aria-expanded={account} aria-controls="account-popover" onClick={()=>{setMenu(false);setAccount(!account);}}>{profile.photo&&/^https:\/\/lh[0-9]+\.googleusercontent\.com\//.test(profile.photo)?<img src={profile.photo} alt="" referrerPolicy="no-referrer"/>:<Icon name="person"/>}</button>
         {account&&<div ref={popover} tabIndex={-1} role="dialog" aria-label={text.account} id="account-popover" className="account-popover">
           <h2>{text.account}</h2><AccountFields profile={profile} language={language}/>
           <button className="secondary" onClick={()=>navigate('settings')}><Icon name="settings"/>{text.settings}</button>
@@ -68,7 +68,8 @@ export function WorkspaceShell({profile,language,tab,unread,demo,onNavigate,onSi
           <Icon name={item as 'home'|'cases'|'manuals'}/>{name(item)}{item==='manuals'&&unread>0&&<span className="notification-count">{unread}</span>}
         </button>)}</nav><div className="drawer-bottom"><button type="button" className={'drawer-link '+(tab==='settings'?'current':'')} onClick={()=>navigate('settings')}><Icon name="settings"/>{text.settings}</button></div>
       </aside></>}
-    <main className="content flow workspace-content">{children}</main>
+    <main className={'content flow workspace-content '+(profile.role==='employee'?'staff-workspace':'')}>{children}</main>
+    {profile.role==='employee'&&<nav className="staff-bottom" aria-label={text.menu}>{(['home','cases','manuals'] as const).map(item=><button key={item} type="button" aria-current={tab===item?'page':undefined} onClick={()=>navigate(item)}><Icon name={item}/>{name(item)}</button>)}</nav>}
   </div>;
 }
 export function Settings({profile,language,site,busy,onLanguage,onSite}:{profile:Profile;language:Language;site:string;busy:boolean;onLanguage:(language:Language)=>void;onSite:(site:string)=>void}) {

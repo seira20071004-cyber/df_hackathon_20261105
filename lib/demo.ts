@@ -5,7 +5,8 @@ const scope = {organizationId: 'demo', siteId: 'sakura'};
 export const demoProfiles: Record<string, Profile> = Object.fromEntries([
   {id: 'linh', name: 'Linh Nguyễn', role: 'employee', preferredLanguage: 'vi'},
   {id: 'alex', name: 'Alex Smith', role: 'employee', preferredLanguage: 'en'},
-  {id: 'sato', name: '佐藤 美咲', role: 'manager', preferredLanguage: 'ja'}
+  {id: 'sato', name: '佐藤 美咲', role: 'manager', preferredLanguage: 'ja'},
+  {id: 'tanaka', name: '田中 健太', role: 'manager', preferredLanguage: 'ja'}
 ].map(profile => [profile.id, {...profile,companyName:'Bridge Work デモ株式会社', organizationId: scope.organizationId, siteIds: [scope.siteId]} as Profile]));
 
 export const examples = [

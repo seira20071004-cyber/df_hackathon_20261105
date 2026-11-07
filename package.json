@@ -6,6 +6,7 @@
     "dev": "next dev --webpack",
     "build": "next build --webpack",
     "start": "next start",
+    "demo": "node scripts/demo.mjs",
     "check": "tsc --noEmit",
     "test": "node --test tests/*.test.mjs"
   },

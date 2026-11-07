@@ -10,17 +10,25 @@ import {publicationHash,publicationPayload,releasedManual,publicManual} from './
 import {publicationInspection,safeToPublish} from './privacy';
 import {accessPolicySchema,defaultAccess,publishableAccess} from './manual-access';
 import {digest} from './security-content';
+import {prepareProtectedSource,hideProtectedText,coversAnswers} from './protected-source';
+import {prepareManualSource} from './manuals';
 import {cosine,semanticHash,semanticText} from './semantic-search';
 import { isScoped, languageNames, languages, mayReadManual, mayReadQuestion, mayReuse, topic, type Language, type Manual, type Match, type Profile, type Question } from './model';
-import { deliverManual, isDemo, list, mutate,openPublishedManual,recordManualSession, resolveWithManual, setLanguage, slug, staffRecipients } from './storage';
+import { deliverManual, isDemo, list, mutate,openPublishedManual,recordManualSession, resolveWithManual, setLanguage, setDisplayName, slug, staffRecipients, siteManagers } from './storage';
 
 const text = z.string().trim().min(1).max(3000);
 const location = {siteId: slug};
 const record = {...location, id: slug};
 export const actionSchema = z.discriminatedUnion('action', [
+  z.object({action:z.literal('profileName'),name:z.string().trim().min(1).max(100)}).strict(),
   z.object({action: z.literal('language'), language: z.enum(languages)}),
   z.object({action: z.literal('search'), ...location, text, language: z.enum(languages)}),
   z.object({action: z.literal('ask'), ...location, text, language: z.enum(languages), id: z.uuid()}),
+  z.object({action:z.literal('retryTranslation'),...record,messageId:slug,language:z.enum(languages)}),
+  z.object({action:z.literal('assign'),...record,managerId:slug.optional()}),
+  z.object({action:z.literal('prepareSource'),...record,version:z.string().max(40)}),
+  z.object({action:z.literal('hideSource'),...record,version:z.string().max(40),index:z.number().int().min(0).max(120),start:z.number().int().min(0).max(100000),end:z.number().int().min(1).max(100000)}),
+  z.object({action:z.literal('approveSource'),...record,version:z.string().max(40),confirmed:z.literal(true)}),
   z.object({action: z.literal('reply'), ...record, text, messageId: z.uuid()}),
   z.object({action: z.literal('resolve'), ...record, text: z.string().trim().max(3000).optional()}),
   z.object({action: z.literal('reuse'), ...record, approved: z.boolean()}),
@@ -67,10 +75,10 @@ export async function workspace(profile: Profile) {
         received.some(delivery=>delivery.manualId===manual.id) ||
         legacyReferences.some(reference => reference.id === manual.id))).map(staffManual)};
   }));
-  return {profile, demo: isDemo(), ai: aiConfigured(),
+  return {profile, demo: isDemo(), ai: aiConfigured(),aiFixtures:isDemo()&&process.env.NODE_ENV==='development'&&process.env.BRIDGE_AI_FIXTURES==='true',
     manualStats:sites.flatMap(site=>site.uses).reduce<Record<string,{uses:number;resolved:number;unresolved:number}>>((stats,use)=>{
       const row=stats[use.manualId]??={uses:0,resolved:0,unresolved:0};row.uses++;if(use.outcome==='resolved')row.resolved++;if(use.outcome==='unresolved')row.unresolved++;return stats;},{}),
-    staff:await staffRecipients(profile),deliveries:sites.flatMap(site=>site.deliveries).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)),
+    staff:await staffRecipients(profile),managers:profile.role==='manager'?await siteManagers(profile):[],deliveries:sites.flatMap(site=>site.deliveries).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)),
     questions: newest(sites.flatMap(site => site.questions.filter(row => mayReadQuestion(profile,row)))),
     manuals: newest(sites.flatMap(site => site.manuals.filter(row => mayReadManual(profile,row))))};
 }
@@ -98,25 +106,21 @@ async function makeQuestion(profile: Profile, siteId: string, id: string, origin
 }
 const needsReview = '管理者による確認が必要';
 function createDraft(question: Question): Manual {
-  const title = (question.japaneseText || question.originalText).slice(0, 500);
-  const replies = question.messages.filter(message => message.role === 'manager').flatMap(message => message.originalText.split(/\r?\n/))
-    .map(reply => reply.trim()).filter(reply => reply.length > 0 && reply.length <= 500);
-  const caution = /^(?:[※＊*]\s*|注意[：:]\s*|警告[：:]\s*|caution[:：]\s*|warning[:：]\s*)/iu;
-  const fallbackSteps = [...new Set(replies.filter(reply => !caution.test(reply)))].slice(-12);
+  const title = '保護済み会話の確認待ち';
   const content = {
     title, task: title, purpose: title, tools: [],
-    steps: fallbackSteps.length ? fallbackSteps : [needsReview],
-    cautions: [...new Set(replies.filter(reply => caution.test(reply)))].slice(-12),
+    steps: [needsReview],
+    cautions: [],
     mistakes: [], checks: []
   };
   const createdAt = date();
   return {id: randomUUID(), organizationId: question.organizationId, siteId: question.siteId, content, translations: {},
     languages: ['ja'], sourceQuestionIds: [question.id], status: 'draft', approvedBy: null, imageUrls: [], createdAt, updatedAt: createdAt,
-    access:structuredClone(defaultAccess),revision:1,approvedAt:null,reviewState:aiConfigured()?'pending_approval':'held',
-    generation: {state: aiConfigured() ? 'queued' : 'failed', attemptId: randomUUID(), startedAt: createdAt,
-      ...(!aiConfigured() ? {error:'not-configured'} : {})}};
+    access:structuredClone(defaultAccess),revision:1,approvedAt:null,reviewState:'held',
+    generation: {state:'held', attemptId: randomUUID(), startedAt: createdAt,error:'source-review-required'}};
 }
 export async function execute(profile: Profile, input: Action) {
+  if(input.action==='profileName'){if(isDemo())throw new ApiError(400,'demo-profile-readonly');await setDisplayName(profile,input.name);return {ok:true};}
   if (input.action === 'language') {
     await setLanguage(profile, input.language);
     return {ok: true};
@@ -198,6 +202,17 @@ export async function execute(profile: Profile, input: Action) {
       return {...match, title, answer: ''};
     })), ai: Boolean(ids)};
   }
+  if(input.action==='retryTranslation'){
+    const question=questions.find(row=>row.id===input.id&&mayReadQuestion(profile,row)),message=question?.messages.find(row=>row.id===input.messageId);
+    if(!question||!message)throw new ApiError(404,'not-found');
+    const source=message.sourceLanguage??(message.role==='manager'?'ja':question.originalLanguage);
+    const translatedText=await translate(message.originalText,source,input.language,isDemo());if(!translatedText)throw new ApiError(503,'translation-unavailable');
+    return {translatedText};
+  }
+  if(input.action==='assign'){
+    assertRole(profile,'manager');const target=(await siteManagers(profile)).find(row=>row.id===(input.managerId??profile.id)&&row.siteIds.includes(siteId));if(!target)throw new ApiError(400,'invalid-recipient');
+    return mutate(profile,siteId,'questions',input.id,question=>{if(!question)throw new ApiError(404,'not-found');if(question.status==='resolved')throw new ApiError(409,'closed-or-limit');if(question.assigneeId&&(!input.managerId||question.assigneeId!==profile.id))throw new ApiError(409,'already-assigned');return {...question,status:'active',assigneeId:target.id,assigneeName:target.name,assignments:[...(question.assignments??[]),{by:profile.id,to:target.id,at:date()}].slice(-50)};});
+  }
   if (input.action === 'reply' || input.action === 'resolve' || input.action === 'reuse') {
     const previous = questions.find(row => row.id === input.id && mayReadQuestion(profile,row));
     if (!previous) throw new ApiError(404, 'not-found');
@@ -213,9 +228,7 @@ export async function execute(profile: Profile, input: Action) {
         if (question.messages.length !== previous.messages.length) throw new ApiError(409, 'conversation-updated');
         return {...question, status: 'resolved', resolvedAt: date(), resolution};
       });
-      if (result.created && aiConfigured()) {
-        after(() => buildManual(profile, manual, result.question, false));
-      }
+      if(result.created)after(()=>prepareManualSource(profile,manual,result.question));
       return result.question;
     }
     const source = profile.role === 'manager' ? 'ja' : previous.originalLanguage;
@@ -229,8 +242,9 @@ export async function execute(profile: Profile, input: Action) {
       }
       if (question.messages.some(message => message.id === input.messageId)) return question;
       if (question.status === 'resolved' || question.messages.length >= 50) throw new ApiError(409, 'closed-or-limit');
-      const next: Question = {...question, status: profile.role === 'manager' ? 'active' : question.status, messages: [...question.messages, {
-        id: input.messageId, senderId: profile.id, role: profile.role, originalText: input.text, translatedText, targetLanguage: target, createdAt: date()
+      if(profile.role==='manager'&&question.assigneeId&&question.assigneeId!==profile.id)throw new ApiError(409,'already-assigned');
+      const next: Question = {...question,...(profile.role==='manager'&&!question.assigneeId?{assigneeId:profile.id,assigneeName:profile.name,assignments:[{by:profile.id,to:profile.id,at:date()}]}:{}), status: profile.role === 'manager' ? 'active' : question.status, messages: [...question.messages, {
+        id: input.messageId, senderId: profile.id,senderName:profile.name,sourceLanguage:source, role: profile.role, originalText: input.text, translatedText, targetLanguage: target, createdAt: date()
       }]};
       if (Buffer.byteLength(JSON.stringify(next)) > 800_000) throw new ApiError(409, 'closed-or-limit');
       return next;
@@ -239,6 +253,23 @@ export async function execute(profile: Profile, input: Action) {
   assertRole(profile, 'manager');
   const previous = manuals.find(manual => manual.id === input.id);
   if (!previous) throw new ApiError(404, 'not-found');
+  if(input.action==='prepareSource'||input.action==='hideSource'||input.action==='approveSource'){
+    if(previous.access?.level==='RESTRICTED'||previous.status!=='draft'||generationRunning(previous))throw new ApiError(409,'source-review-required');
+    if(previous.updatedAt!==input.version)throw new ApiError(409,'stale-manual');
+    const question=questions.find(row=>previous.sourceQuestionIds.includes(row.id));if(!question)throw new ApiError(404,'source-missing');
+    let protectedSource=previous.protectedSource;
+    if(input.action==='prepareSource')protectedSource=await prepareProtectedSource(profile,question,previous.clarification?.answers??[],protectedSource);
+    if(!protectedSource)throw new ApiError(409,'source-review-required');
+    if(input.action==='hideSource'){try{protectedSource=hideProtectedText(protectedSource,input.index,input.start,input.end);}catch{throw new ApiError(400,'invalid-selection');}}
+    if(input.action==='approveSource'){
+      if(!protectedSource.context||!coversAnswers(protectedSource,previous.clarification?.answers??[]))throw new ApiError(409,'source-review-required');
+      if(!aiConfigured())throw new ApiError(503,'ai-not-configured');
+      protectedSource={...protectedSource,approvedBy:profile.id,approvedAt:date()};
+    }
+    const checked=protectedSource,queued=input.action==='approveSource',at=date();
+    const draft=await mutate(profile,siteId,'manuals',input.id,manual=>{if(!manual||manual.updatedAt!==input.version)throw new ApiError(409,'stale-manual');return {...manual,protectedSource:checked,...(queued&&manual.pipeline?{pipeline:{...manual.pipeline,verification:'pending' as const}}:{}),updatedAt:at,reviewState:queued?'pending_approval':'held',generation:{state:queued?'queued':'held',attemptId:randomUUID(),startedAt:at,...(!queued?{error:'source-review-required'}:{})}};});
+    if(queued)after(()=>buildManual(profile,draft,question,false));return draft;
+  }
   if(input.action==='manualAccess'){
     const recipients=await staffRecipients(profile);if(input.access.allowedUserIds.some(id=>!recipients.some(person=>person.id===id&&person.siteIds.includes(siteId))))throw new ApiError(400,'invalid-recipient');
     return mutate(profile,siteId,'manuals',input.id,manual=>{
@@ -267,10 +298,11 @@ export async function execute(profile: Profile, input: Action) {
       const added=input.answers.map(answer=>({id:'supplement-'+randomUUID(),questionId:answer.questionId,question:pending.find(question=>question.id===answer.questionId)!.question,
         answer:answer.answer,round:manual.clarification!.round,answeredBy:profile.id,createdAt:date()}));
       return {...manual,status:'draft',approvedBy:null,reviewState:'pending_approval',updatedAt:date(),clarification:{...manual.clarification,questions:[],answers:[...manual.clarification.answers,...added]},
-        generation:{state:'queued',attemptId:randomUUID(),startedAt:date()}};
-    });after(()=>buildManual(profile,draft,source,false));return draft;
+        generation:{state:'held',attemptId:randomUUID(),startedAt:date(),error:'source-review-required'}};
+    });after(()=>prepareManualSource(profile,draft,source,true));return draft;
   }
   if(input.action==='saveProgram'){
+    if(input.publish&&previous.protectedSource&&(!previous.protectedSource.approvedAt||!coversAnswers(previous.protectedSource,previous.clarification?.answers??[])))throw new ApiError(409,'source-review-required');
     if(input.publish&&!publishableAccess(previous))throw new ApiError(400,'restricted-manual');
     if(generationRunning(previous))throw new ApiError(409,'generation-running');
     if(input.program.language!=='ja'||graphIssues(input.program).length)throw new ApiError(400,'invalid-program');
@@ -327,6 +359,7 @@ export async function execute(profile: Profile, input: Action) {
   }
   if (input.action === 'regenerateManual') {
     if(previous.access?.level==='RESTRICTED')throw new ApiError(400,'restricted-manual');
+    if(!input.imagesOnly)throw new ApiError(409,'source-review-required');
     if (!aiConfigured()) throw new ApiError(503, 'ai-not-configured');
     const question = questions.find(row => previous.sourceQuestionIds.includes(row.id));
     if (!input.imagesOnly && !question) throw new ApiError(400, 'source-missing');

@@ -1,7 +1,7 @@
 import {appCheckConfigSchema,type PublicAppCheck} from './app-check-schema.ts';
 type TokenSource={getToken:(forceRefresh:boolean)=>Promise<string>};
 type Options={fetcher:typeof fetch;loadTokenSource:(config:Extract<PublicAppCheck,{enabled:true}>)=>Promise<TokenSource>;timeoutMs?:number};
-const configSchema=(value:unknown)=>{const data=value as {demo?:unknown;appCheck?:unknown};if(!data||typeof data.demo!=='boolean')throw new Error('app-check-unavailable');return {demo:data.demo,appCheck:appCheckConfigSchema.parse(data.appCheck)};};
+const configSchema=(value:unknown)=>{const data=value as {demo?:unknown;appCheck?:unknown};if(!data||typeof data.demo!=='boolean')throw new Error('app-check-unavailable');return {demo:data.demo,appCheck:appCheckConfigSchema.parse(data.appCheck),googleAuth:(data as {googleAuth?:unknown}).googleAuth};};
 async function deadline<T>(work:Promise<T>,ms:number):Promise<T>{let timer:ReturnType<typeof setTimeout>|undefined;try{return await Promise.race([work,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('app-check-unavailable')),ms);})]);}finally{if(timer)clearTimeout(timer);}}
 export function createBridgeTransport({fetcher,loadTokenSource,timeoutMs=15000}:Options){
  let configuration:Promise<ReturnType<typeof configSchema>>|undefined,source:Promise<TokenSource>|undefined;
@@ -13,7 +13,7 @@ export function createBridgeTransport({fetcher,loadTokenSource,timeoutMs=15000}:
   }catch{throw new Error('app-check-unavailable');}
  }
  return async function bridgeFetch(suffix='',init:RequestInit={}){
-  if(!['','?config','?login'].includes(suffix))throw new Error('invalid-api-route');
+  if(!['','?config','?login','?onboard','?invite'].includes(suffix))throw new Error('invalid-api-route');
   if(suffix==='?config')return Response.json(await config());
   const send=async(force:boolean)=>{const outgoing=new Headers(init.headers);const proof=await headers(force);for(const [key,value] of Object.entries(proof))outgoing.set(key,value);return fetcher('/api/bridge'+suffix,{...init,credentials:'same-origin',cache:'no-store',headers:outgoing});};
   const response=await send(false);

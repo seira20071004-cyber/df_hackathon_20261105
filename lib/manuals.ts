@@ -1,13 +1,18 @@
 import {generateChecked,illustrate} from './ai';
 import type {Manual,Profile,Question} from './model';
 import {mutate} from './storage';
-import {generationContext,INTERACTIVE_PROMPT_VERSION,runInteractiveGeneration} from './interactive-generation';
+import {INTERACTIVE_PROMPT_VERSION,runInteractiveGeneration} from './interactive-generation';
 import {programContent} from './manual-graph';
-import {protectAiData,publicationInspection,safeToPublish} from './privacy';
+import {publicationInspection,safeToPublish} from './privacy';
+import {prepareProtectedSource,coversAnswers} from './protected-source';
 import {digest} from './security-content';
 import {publicationHash,publicationPayload} from './publication';
 import {audit,securityContext} from './security-runtime';
 
+export async function prepareManualSource(profile:Profile,draft:Manual,question:Question,keepEdits=false){
+ const protectedSource=await prepareProtectedSource(profile,question,draft.clarification?.answers??[],keepEdits?draft.protectedSource:undefined);
+ await mutate(profile,draft.siteId,'manuals',draft.id,current=>{if(!current||current.updatedAt!==draft.updatedAt||current.generation?.attemptId!==draft.generation?.attemptId)throw new Error('obsolete-attempt');return {...current,protectedSource,updatedAt:new Date().toISOString()};}).catch(()=>undefined);
+}
 export const generationRunning=(manual:Manual)=>Boolean(manual.generation&&['queued','analyzing','checking_gaps','writing','validating','illustrating'].includes(manual.generation.state)&&Date.now()-Date.parse(manual.generation.startedAt)<300_000);
 export async function buildManual(profile:Profile,draft:Manual,question:Question|undefined,imagesOnly:boolean){
   return securityContext.run(profile,()=>buildProtectedManual(profile,draft,question,imagesOnly));
@@ -27,7 +32,9 @@ async function buildProtectedManual(profile:Profile,draft:Manual,question:Questi
       await update({imageUrls:image.images,imageLayout:'steps',reviewState:'pending_approval',generation:status(image.images.length===draft.content.steps.length?'ready':'failed',image.error),updatedAt:new Date().toISOString()});return;
     }
     if(!question)throw new Error('source-missing');
-    const answers=draft.clarification?.answers??[],raw=generationContext(profile,question,answers),context=await protectAiData(raw.context),hash=digest(context),bytes=Buffer.byteLength(JSON.stringify(context));
+    const source=draft.protectedSource,rawAnswers=draft.clarification?.answers??[];
+    if(!source?.approvedBy||!source.context||!coversAnswers(source,rawAnswers))throw new Error('source-review-required');
+    const context=source.context,answers=rawAnswers.map(answer=>({...answer,answer:context.sources.find(row=>row.id===answer.id)!.text})),hash=digest(context),bytes=Buffer.byteLength(JSON.stringify(context));
     let pipeline:NonNullable<Manual['pipeline']>={promptVersion:INTERACTIVE_PROMPT_VERSION,contextHash:hash,contextBytes:bytes,messageCount:context.sources.length,
       provider:process.env.GEMINI_PROVIDER==='vertex'?'vertex':'developer',model:process.env.GEMINI_MODEL||'gemini-2.5-flash',verification:'pending',issues:[],factCount:0,supersededCount:0};
     await update({pipeline});
@@ -40,7 +47,7 @@ async function buildProtectedManual(profile:Profile,draft:Manual,question:Questi
     const common:Partial<Manual>={pipeline,extraction:result.extraction,quality:{...(result.report?{report:result.report}:{}),issues:result.issues,repairs:result.repairs}};
     if(result.state==='awaiting_answers'){
       await update({...common,reviewState:'awaiting_answers',clarification:{round:(draft.clarification?.round??0)+1,questions:result.questions,
-        previousQuestions:[...(draft.clarification?.previousQuestions??[]),...result.questions],answers},generation:status('awaiting_answers'),updatedAt:new Date().toISOString()});return;
+        previousQuestions:[...(draft.clarification?.previousQuestions??[]),...result.questions],answers:rawAnswers},generation:status('awaiting_answers'),updatedAt:new Date().toISOString()});return;
     }
     if(result.state==='held'){
       await update({...common,reviewState:'held',generation:status('held','review-required'),updatedAt:new Date().toISOString()});return;
@@ -59,13 +66,13 @@ async function buildProtectedManual(profile:Profile,draft:Manual,question:Questi
     const inspection=await publicationInspection(publicationPayload(candidate));
     if(!safeToPublish(inspection)){await update({...common,program,content,imageUrls,reviewState:'held',security:{inspection,contentHash:publicationHash(candidate),checkedAt:at},generation:status('held','privacy-review'),updatedAt:at});return;}
     await update({...common,program,content,evidence,programTranslations:{},translations:{},languages:['ja'],imageUrls,imageLayout:'steps',reviewState:'pending_approval',revision,
-      security:{inspection,contentHash:publicationHash(candidate),checkedAt:at},clarification:{round:draft.clarification?.round??0,questions:[],previousQuestions:draft.clarification?.previousQuestions??[],answers},
+      security:{inspection,contentHash:publicationHash(candidate),checkedAt:at},clarification:{round:draft.clarification?.round??0,questions:[],previousQuestions:draft.clarification?.previousQuestions??[],answers:rawAnswers},
       audit:[...(draft.audit??[]),{revision,at,actor:'Gemini',action:'generated' as const,changes:['対話型マニュアルを構成・検証']}].slice(-30),
       generation:status(imageError?'failed':'ready',imageError),updatedAt:at});
     await audit({actorId:profile.id,organizationId:profile.organizationId,action:'manual_generated',result:'success',resourceId:draft.id});
   }catch(error){
     const message=error instanceof Error?error.message:'provider-error';if(message==='obsolete-attempt')return;
-    const code=['restricted-manual','context-limit','context-scope','source-not-resolved','source-missing','not-configured','quota','prepay','access-denied','generation-timeout','invalid-json','privacy-unavailable','sensitive-input-blocked','sensitive-output','rate-limited','secret-invalid','secret-access-denied','secret-unavailable','secret-manager-required'].includes(message)?message:'provider-error';
+    const code=['source-review-required','restricted-manual','context-limit','context-scope','source-not-resolved','source-missing','not-configured','quota','prepay','access-denied','generation-timeout','invalid-json','privacy-unavailable','sensitive-input-blocked','sensitive-output','rate-limited','secret-invalid','secret-access-denied','secret-unavailable','secret-manager-required'].includes(message)?message:'provider-error';
     await update({reviewState:'held',generation:status('failed',code),updatedAt:new Date().toISOString()}).catch(()=>undefined);
     await audit({actorId:profile.id,organizationId:profile.organizationId,action:'manual_generation',result:'failed',code,resourceId:draft.id}).catch(()=>undefined);
   }

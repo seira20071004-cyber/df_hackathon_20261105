@@ -7,6 +7,7 @@ export interface Profile {
   id: string;
   name: string;
   companyName?:string;
+  photo?:string;
   role: Role;
   organizationId: string;
   siteIds: string[];
@@ -15,6 +16,8 @@ export interface Profile {
 export interface Message {
   id: string;
   senderId: string;
+  senderName?:string;
+  sourceLanguage?:Language;
   role: Role;
   originalText: string;
   translatedText: string;
@@ -25,6 +28,9 @@ export interface Question {
   id: string;
   organizationId: string;
   siteId: string;
+  assigneeId?:string;
+  assigneeName?:string;
+  assignments?:{by:string;to:string;at:string}[];
   employeeId: string;
   originalText: string;
   originalLanguage: Language;
@@ -70,6 +76,7 @@ export interface Manual {
   publishedSnapshot?:Manual;
   publicationSuppressed?:boolean;
   security?:{contentHash:string;inspection:import('./security-content').Inspection;checkedAt:string};
+  protectedSource?:import('./protected-source').ProtectedSource;
   program?:ManualProgram;
   programTranslations?:Partial<Record<Language,ManualProgram>>;
   extraction?:ExtractedChat;
@@ -140,10 +147,12 @@ export type StaffRecipient=Pick<Profile,'id'|'name'|'siteIds'>;
 export interface Workspace {
   profile: Profile;
   demo: boolean;
+  aiFixtures?:boolean;
   ai: boolean;
   questions: Question[];
   manuals: Manual[];
   staff:StaffRecipient[];
+  managers?:StaffRecipient[];
   deliveries:ManualDelivery[];
   manualStats:Record<string,{uses:number;resolved:number;unresolved:number}>;
 }

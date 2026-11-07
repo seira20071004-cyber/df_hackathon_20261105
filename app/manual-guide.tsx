@@ -10,10 +10,16 @@ const words={ja:{start:'マニュアルを開始',next:'次へ',back:'前へ',qu
 export function ManualGuide({manual,program,language,onEvent,onBlock,contextText}:{manual:Manual;program:ManualProgram;language:Language;onEvent?:ManualEvent;onBlock?:(id:string)=>void;contextText?:string}){
   const text=words[language];
   const [run,setRun]=useState(()=>crypto.randomUUID()),[trail,setTrail]=useState<string[]>([]),[contact,setContact]=useState(false),[done,setDone]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [overview,setOverview]=useState(false);
   const [question,setQuestion]=useState(contextText||program.title);
   const current=program.blocks.find(block=>block.id===trail.at(-1));
   useEffect(()=>{if(current)onBlock?.(current.id);},[current?.id,onBlock]);
-  function next(target:string|null){setError('');if(target===null){setContact(true);return;}setTrail(current=>[...current,target]);}
+  function next(target:string|null){setError('');if(target===null){openContact();return;}setTrail(current=>[...current,target]);}
+  function openContact(){
+    const labels={ja:['最初の相談','参照したマニュアル','進んだ手順・選択','未解決の内容'],en:['Original question','Guide opened','Steps and choices followed','Still unresolved'],vi:['Câu hỏi ban đầu','Hướng dẫn đã xem','Các bước và lựa chọn đã đi qua','Vấn đề chưa giải quyết']}[language];
+    const followed=trail.slice(0,-1).flatMap((id,index)=>{const block=program.blocks.find(row=>row.id===id);if(block?.type==='step')return [block.title];if(block?.type==='branch'){const choices=block.choices.filter(choice=>choice.nextBlockId===trail[index+1]);return choices.length===1?[block.question+' → '+choices[0].label]:[];}return [];});
+    setQuestion([contextText?labels[0]+': '+contextText:'',labels[1]+': '+program.title,followed.length?labels[2]+': '+followed.join(' → '):'',labels[3]+': '].filter(Boolean).join('\n').slice(0,3000));setContact(true);
+  }
   async function start(){setBusy(true);setError('');try{await onEvent?.('start',run,[],undefined,language);setTrail([program.startBlockId]);}catch{setError(text.error);}finally{setBusy(false);}}
   async function finish(event:'resolved'|'unresolved'){setBusy(true);setError('');try{await onEvent?.(event,run,trail,question,language);setDone(true);}catch{setError(text.error);}finally{setBusy(false);}}
   function reset(){setRun(crypto.randomUUID());setTrail([]);setContact(false);setDone(false);setError('');}
@@ -21,6 +27,8 @@ export function ManualGuide({manual,program,language,onEvent,onBlock,contextText
   const stepPictures=ordinal>=0?(manual.figures??[]).filter(figure=>figure.afterStep===ordinal):[];
   return <section className="interactive-guide" aria-label="対話型マニュアル">
     {program.description&&<p className="guide-description">{program.description}</p>}
+    <button className="secondary" type="button" aria-expanded={overview} onClick={()=>setOverview(!overview)}>{{ja:'全体を見る',en:'View overview',vi:'Xem tổng quan'}[language]}</button>
+    {overview&&<ol className="guide-overview">{program.blocks.map(block=><li key={block.id} className={trail.includes(block.id)?'on-path':''}>{block.type==='step'?block.title:block.type==='branch'?block.question:block.content}</li>)}</ol>}
     {!onEvent&&<p className="muted guide-preview">{text.preview}</p>}
     {error&&<p role="alert" className="alert">{error}</p>}
     {done?<div className="guide-end" role="status"><span aria-hidden="true">✓</span><h3>{onEvent?text.done:text.preview}</h3><button className="secondary" onClick={reset}>{text.restart}</button></div>:
@@ -42,7 +50,7 @@ export function ManualGuide({manual,program,language,onEvent,onBlock,contextText
         <><h3>{current.content}</h3><div className="branch-choices"><button disabled={busy} onClick={()=>finish('resolved')}>✓ {text.solved}</button>
           <button className="secondary" disabled={busy} onClick={()=>next(current.failureNextBlockId)}>{text.failed} →</button></div></>}
         <div className="actions guide-help">{trail.length>1&&<button className="link" disabled={busy} onClick={()=>setTrail(current=>current.slice(0,-1))}>← {text.back}</button>}
-          <button className="link" disabled={busy} onClick={()=>setContact(true)}>{text.unknown}</button></div>
+          <button className="link" disabled={busy} onClick={openContact}>{text.unknown}</button></div>
       </div>}
   </section>;
 }

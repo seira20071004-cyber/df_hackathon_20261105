@@ -5,7 +5,8 @@ import {authenticate,isDemo} from '../../../lib/storage';
 import {actionSchema,ApiError,execute,workspace} from '../../../lib/workflow';
 import {audit,loginLimit,requestLimit,SecurityError,securityContext} from '../../../lib/security-runtime';
 import type {Profile} from '../../../lib/model';
-import {publicAppCheckConfig} from '../../../lib/app-check-config';
+import {googleIdentity,onboard,onboardingSchema,inviteSchema,issueInvitation} from '../../../lib/organization';
+import {publicGoogleAuth,publicAppCheckConfig} from '../../../lib/app-check-config';
 import {verifyAppCheckProof,AppCheckDenied} from '../../../lib/app-check-verifier';
 export const runtime='nodejs';export const dynamic='force-dynamic';export const maxDuration=300;
 const reply=(body:unknown,status=200)=>NextResponse.json(body,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...(status===429?{'Retry-After':'60'}:{})}});
@@ -26,10 +27,12 @@ async function run(request:NextRequest){
  let profile:Profile|null=null,operation='request',resourceId:string|undefined;
  try{
   if(isDemo()&&process.env.NODE_ENV==='production'&&process.env.BRIDGE_ALLOW_PUBLIC_DEMO!=='true')throw new SecurityError(503,'demo-disabled-in-production');
-  if(request.method==='GET'&&request.nextUrl.searchParams.has('config'))return reply({demo:isDemo(),appCheck:publicAppCheckConfig(process.env)});
+  if(request.method==='GET'&&request.nextUrl.searchParams.has('config'))return reply({demo:isDemo(),appCheck:publicAppCheckConfig(process.env),googleAuth:publicGoogleAuth(process.env)});
   if(request.method==='POST'){
    const origin=request.headers.get('origin');const allowed=(process.env.BRIDGE_ALLOWED_ORIGINS??'').split(',').filter(Boolean);
-   if(origin&&origin!==request.nextUrl.origin&&!allowed.includes(origin))throw new SecurityError(403,'origin-denied');
+   const host=request.headers.get('host')??'';
+   const localDevelopment=process.env.NODE_ENV==='development'&&/^(?:127\.0\.0\.1|localhost):\d{1,5}$/.test(host)&&origin==='http://'+host;
+   if(origin&&origin!==request.nextUrl.origin&&!allowed.includes(origin)&&!localDevelopment)throw new SecurityError(403,'origin-denied');
   }
   await appCheck(request);
   if(request.method==='POST'&&request.nextUrl.searchParams.has('login')){
@@ -41,8 +44,19 @@ async function run(request:NextRequest){
    if(!profile)throw new SecurityError(401,'login-failed');await audit({actorId:profile.id,organizationId:profile.organizationId,action:'login',result:'success'});return reply({token:result.idToken});
   }
   const header=request.headers.get('authorization')??'';if(header.length>10000||!header.startsWith('Bearer '))throw new SecurityError(401,'login-required');
+  if(request.method==='POST'&&request.nextUrl.searchParams.has('onboard')){
+   operation='organization_onboarding';if(!publicGoogleAuth(process.env))throw new SecurityError(503,'firebase-unconfigured');
+   await loginLimit();const identity=await googleIdentity(header.slice(7));
+   const input=onboardingSchema.safeParse(await readJson(request,8000));if(!input.success)throw new SecurityError(400,'invalid-input');
+   const result=await onboard(identity,input.data);await audit({actorId:identity.uid,action:operation,result:'success'});return reply(result);
+  }
   profile=await authenticate(header.slice(7),request.headers.get('X-Bridge-Organization')??undefined);if(!profile)throw new SecurityError(401,'login-required');
   await requestLimit(profile);
+  if(request.method==='POST'&&request.nextUrl.searchParams.has('invite')){
+   operation='invite_issue';if(isDemo())throw new SecurityError(503,'firebase-unconfigured');
+   const input=inviteSchema.safeParse(await readJson(request,8000));if(!input.success)throw new SecurityError(400,'invalid-input');
+   const result=await issueInvitation(profile,input.data);await audit({actorId:profile.id,organizationId:profile.organizationId,action:operation,result:'success'});return reply(result);
+  }
   return await securityContext.run(profile,async()=>{
    if(request.method==='GET')return reply(await workspace(profile!));
    const raw=await readJson(request,2_400_000),input=actionSchema.safeParse(raw);if(!input.success||Object.keys(raw).some(key=>!Object.hasOwn(input.data,key)))throw new SecurityError(400,'invalid-input');

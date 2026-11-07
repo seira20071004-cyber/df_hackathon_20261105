@@ -12,29 +12,32 @@ import { languages,mayReadManual, type Profile, type Question, type Manual, type
 
 export const isDemo = () => process.env.BRIDGE_DEMO === 'true';
 export const slug = z.string().regex(/^[a-zA-Z0-9_-]{1,120}$/);
-const profileSchema = z.object({name: z.string(), companyName:z.string().trim().min(1).max(200).optional(),role: z.enum(['employee','manager']), organizationId: slug, siteIds: z.array(slug).min(1).max(30), preferredLanguage: z.enum(languages)});
-function app() {
+const profileSchema = z.object({name: z.string(), companyName:z.string().trim().min(1).max(200).optional(),photo:z.string().max(2048).optional(),role: z.enum(['employee','manager']), organizationId: slug, siteIds: z.array(slug).min(1).max(30), preferredLanguage: z.enum(languages)});
+export function bridgeAdmin() {
   return getApps()[0] ?? initializeApp({credential: applicationDefault(), projectId: process.env.FIREBASE_PROJECT_ID});
 }
 export async function authenticate(token: string,organizationId?:string): Promise<Profile | null> {
   if (isDemo()) return Object.hasOwn(demoProfiles, token)&&(!organizationId||organizationId===demoProfiles[token].organizationId) ? {...demoProfiles[token]} : null;
   if (!token) return null;
-  const user = await getAuth(app()).verifyIdToken(token, true).catch(() => null);
+  const user = await getAuth(bridgeAdmin()).verifyIdToken(token, true).catch(() => null);
   if (!user) return null;
-  const doc = await getFirestore(app()).collection('users').doc(user.uid).get();
+  const doc = await getFirestore(bridgeAdmin()).collection('users').doc(user.uid).get();
   const profile = profileSchema.safeParse(doc.data());
   if(!profile.success)return null;
   if(organizationId&&organizationId!==profile.data.organizationId){
     if(!slug.safeParse(organizationId).success)return null;
-    const member=await getFirestore(app()).collection('organizations').doc(organizationId).collection('members').doc(user.uid).get();
+    const member=await getFirestore(bridgeAdmin()).collection('organizations').doc(organizationId).collection('members').doc(user.uid).get();
     const membership=z.object({active:z.literal(true),role:z.enum(['employee','manager']),siteIds:z.array(slug).min(1).max(30)}).safeParse(member.data());
     if(!membership.success)return null;
     return {...profile.data,...membership.data,organizationId,id:user.uid};
   }
   return {...profile.data, id: user.uid};
 }
+export async function setDisplayName(profile:Profile,name:string){
+ if(!isDemo())await getFirestore(bridgeAdmin()).collection('users').doc(profile.id).update({name});
+}
 export async function setLanguage(profile: Profile, preferredLanguage: Profile['preferredLanguage']) {
-  if (!isDemo()) await getFirestore(app()).collection('users').doc(profile.id).update({preferredLanguage});
+  if (!isDemo()) await getFirestore(bridgeAdmin()).collection('users').doc(profile.id).update({preferredLanguage});
 }
 type Records = {questions: Question; manuals: Manual; manualViews: ManualView; manualDeliveries:ManualDelivery;manualUses:ManualUse};
 type Table = keyof Records;
@@ -50,10 +53,15 @@ async function readDemo(): Promise<DemoState> {
     return {...seedDemo(), manualViews: [],manualDeliveries:[],manualUses:[]};
   }
 }
+export async function siteManagers(profile:Profile):Promise<StaffRecipient[]> {
+ if(profile.role!=='manager')return [];
+ const profiles:Profile[]=isDemo()?Object.values(demoProfiles):(await getFirestore(bridgeAdmin()).collection('users').where('organizationId','==',profile.organizationId).where('role','==','manager').get()).docs.flatMap(doc=>{const result=profileSchema.safeParse(doc.data());return result.success?[{...result.data,id:doc.id}]:[];});
+ return [profile,...profiles.filter(row=>row.id!==profile.id&&row.organizationId===profile.organizationId&&row.role==='manager')].map(({id,name,siteIds})=>({id,name,siteIds:siteIds.filter(site=>profile.siteIds.includes(site))}));
+}
 export async function staffRecipients(profile:Profile):Promise<StaffRecipient[]> {
   if(profile.role!=='manager')return [];
   const profiles:Profile[]=isDemo()?Object.values(demoProfiles):
-    (await getFirestore(app()).collection('users').where('organizationId','==',profile.organizationId).get()).docs.flatMap(doc=>{
+    (await getFirestore(bridgeAdmin()).collection('users').where('organizationId','==',profile.organizationId).get()).docs.flatMap(doc=>{
       const result=profileSchema.safeParse(doc.data());return result.success?[{...result.data,id:doc.id}]:[];
     });
   return profiles.filter(row=>row.organizationId===profile.organizationId && row.role==='employee' && row.siteIds.some(site=>profile.siteIds.includes(site)))
@@ -79,7 +87,7 @@ export async function deliverManual(profile:Profile,siteId:string,manualId:strin
   const manualDoc=collection(profile,siteId,'manuals').doc(manualId);
   return manualDoc.firestore.runTransaction(async tx=>{
     const stored=(await tx.get(manualDoc)).data();const manual=stored&&releasedManual(stored);
-    const users=await tx.getAll(...recipientIds.map(id=>getFirestore(app()).collection('users').doc(id)));
+    const users=await tx.getAll(...recipientIds.map(id=>getFirestore(bridgeAdmin()).collection('users').doc(id)));
     check(manual,users.map(doc=>{const result=profileSchema.safeParse(doc.data());return result.success?{...result.data,id:doc.id}:undefined;}));
     const deliveryDocs=ids.map(id=>collection(profile,siteId,'manualDeliveries').doc(id));
     const previous=await tx.getAll(...deliveryDocs);
@@ -89,7 +97,7 @@ export async function deliverManual(profile:Profile,siteId:string,manualId:strin
 }
 function collection<T extends Table>(profile: Profile, siteId: string, table: T) {
   if (!profile.siteIds.includes(siteId)) throw new Error('Forbidden site');
-  return getFirestore(app()).collection('organizations').doc(profile.organizationId)
+  return getFirestore(bridgeAdmin()).collection('organizations').doc(profile.organizationId)
     .collection('sites').doc(siteId).collection(table) as CollectionReference<Records[T]>;
 }
 export async function list<T extends Table>(profile: Profile, siteId: string, table: T): Promise<Records[T][]> {

@@ -7,6 +7,7 @@ import { stairRange } from '../lib/diagrams';
 import { RangeDiagram } from './range-diagram';
 import { ManualEditor } from './manual-editor';
 import {ManualGuide,type ManualEvent} from './manual-guide';
+import {ProtectedSourceReview,type SourceAction} from './protected-source-review';
 import {ProgramEditor} from './program-editor';
 import {ManualAccessEditor} from './manual-access-editor';
 import type {ManualAccess} from '../lib/manual-access';
@@ -112,9 +113,9 @@ const errors: Record<string,string> = {
   ,'generation-timeout':'生成が時間内に完了しませんでした。再生成できます。'
   ,'review-required':'品質検証または情報確認のため保留しています。下の確認事項を参照してください。'
 };
-export function ManualReview({manual, questions, busy, ai, regenerate, save,saveProgram,answer,changeState,stats,staff,saveAccess}: {
+export function ManualReview({manual, questions, busy, ai, regenerate, save,saveProgram,answer,changeState,stats,staff,saveAccess,sourceAction}: {
   manual: Manual; questions: Question[]; busy: boolean; ai: boolean;
-  staff:StaffRecipient[];saveAccess:(access:ManualAccess)=>void;
+  staff:StaffRecipient[];saveAccess:(access:ManualAccess)=>void;sourceAction:(action:SourceAction)=>void;
   regenerate: (imagesOnly:boolean) => void;
   save: (content:ManualContent,publish:boolean,edits?:ManualEdits) => void;
   saveProgram:(program:ManualProgram,publish:boolean,confirmed:boolean)=>void;
@@ -136,14 +137,16 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
   const highlighted = new Set(citations.map(citation=>citation.messageId));
   const fallbackReply = sources.flatMap(source=>source.messages).filter(message=>message.role==='manager').at(-1);
   if (!highlighted.size && fallbackReply) highlighted.add(fallbackReply.id);
-  const stateLabel = generating ? state === 'illustrating' ? '任意の図解を生成中' : state==='validating' ? '品質と原文との一致を検証中' : state==='checking_gaps'?'重要な不足情報を確認中':state==='analyzing' ? '確定情報と訂正を抽出中' : 'ブロック構成を設計中' :
+  const needsSource=manual.status==='draft'&&manual.generation?.error==='source-review-required';
+  const stateLabel = needsSource?'生成前の確認待ち':generating ? state === 'illustrating' ? '任意の図解を生成中' : state==='validating' ? '品質と原文との一致を検証中' : state==='checking_gaps'?'重要な不足情報を確認中':state==='analyzing' ? '確定情報と訂正を抽出中' : 'ブロック構成を設計中' :
     manual.status==='published'?'確認済みのマニュアル':manual.reviewState==='awaiting_answers'?'管理者への追加質問があります':manual.reviewState==='rejected'?'却下したマニュアル':manual.reviewState==='held'?'保留中のマニュアル':state==='failed'?'生成内容の確認が必要です':'承認待ちのマニュアル';
   const activeStep=manual.reviewState==='awaiting_answers'?1:generating?(state==='analyzing'||state==='queued'?0:state==='checking_gaps'?1:state==='writing'?2:3):4;
   return <section className="panel flow review-panel">
     <div className="split"><div><div className="eyebrow">MANUAL STUDIO</div><h2>{stateLabel}</h2></div>
       <span className={'badge ' + (manual.status === 'published' ? 'resolved' : 'active')}>{manual.status === 'published' ? '確認済' : '未確認'}</span></div>
-    <ManualAccessEditor key={manual.id+manual.updatedAt} manual={manual} staff={staff} busy={busy||generating} onSave={saveAccess}/>
-    <div className="generation-track" role="status" aria-live="polite">
+    {manual.status==='draft'&&!generating&&manual.reviewState!=='awaiting_answers'&&manual.access?.level!=='RESTRICTED'&&sources.length>0&&(needsSource||state==='failed'?<ProtectedSourceReview key={manual.updatedAt} manual={manual} busy={busy} ai={ai} onAction={sourceAction}/>:<details className="pipeline-report"><summary>保護済み会話を確認・再生成</summary><ProtectedSourceReview key={manual.updatedAt} manual={manual} busy={busy} ai={ai} onAction={sourceAction}/></details>)}
+    {!needsSource&&<ManualAccessEditor key={manual.id+manual.updatedAt} manual={manual} staff={staff} busy={busy||generating} onSave={saveAccess}/>}
+    {!needsSource&&<><div className="generation-track" role="status" aria-live="polite">
       {['会話を抽出','不足を確認','構成を設計','品質を検証','管理者が承認'].map((label,index) => <span key={label}
         className={index<activeStep?'progress-done':index===activeStep?'progress-active':''}>
         <b>{index + 1}</b>{label}
@@ -173,7 +176,7 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
       <p className="muted">AIの照合は正しさを保証しません。図解と実際の作業条件は管理者が確認します。</p>
     </details>}
     <div className="actions">
-      <button className="secondary" disabled={busy || generating || !ai || !sources.length} onClick={() => regenerate(false)}>✧ 会話から作り直す</button>
+
       <button className="secondary" disabled={busy || generating || !ai} onClick={() => regenerate(true)}>▧ 図解を再生成</button>
       <button className="link" disabled={generating} onClick={() => setEditing(!editing)} aria-expanded={editing}>{editing ? '編集を閉じる' : '編集する'}</button>
       {manual.status==='published'?<button className="secondary" disabled={busy} onClick={()=>changeState('unpublish')}>非公開にする</button>:
@@ -209,6 +212,7 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
     </div>
     {!generating && (editing ? manual.program?<ProgramEditor key={'editor-'+manual.id+manual.updatedAt} manual={manual} busy={busy} onSave={saveProgram}/>:<ManualEditor key={'legacy-editor-'+manual.id + manual.updatedAt} manual={manual} busy={busy} save={save}/> :
       <ReviewApproval key={'approval-'+manual.id+manual.updatedAt} manual={manual} busy={busy} onEdit={()=>setEditing(true)} save={save} saveProgram={saveProgram}/>)}
+    </>}
     {Boolean(manual.audit?.length)&&<details className="pipeline-report"><summary>編集・承認履歴</summary><ul>{[...manual.audit!].reverse().map((entry,index)=><li key={index}>v{entry.revision} · {new Date(entry.at).toLocaleString('ja-JP')} · {entry.actor} · {entry.action} · {entry.changes.join('、')}</li>)}</ul></details>}
   </section>;
 }

@@ -106,12 +106,12 @@ test('Vietnamese consultation, safe reuse, and publication survive reload', {tim
   assert.equal(created.length,1);
   let [draft] = created;
   assert.equal(draft.status,'draft');
-  assert.ok(draft.content.steps.includes(answer));
+  assert.equal(draft.generation.state,'held');assert.equal(draft.program,undefined);
   assert.deepEqual(draft.content.cautions,[]);
   assert.equal((await api('alex')).manuals.some(row => row.id === draft.id),false);
   assert.equal((await search('alex')).matches.some(match => match.id === draft.id),false);
   await api('alex',{action:'viewManual',id:draft.id,version:draft.updatedAt},404);
-  const content = {...draft.content,purpose:'清掃の担当範囲を確認する',steps:[answer]};
+  const content = {...draft.content,title:'階段はどこまで掃除しますか？',purpose:'清掃の担当範囲を確認する',steps:[answer]};
   const save = {action:'saveManual',id:draft.id,version:draft.updatedAt,content,publish:true};
   await api('linh',save,403);
   await api('sato',save,400);

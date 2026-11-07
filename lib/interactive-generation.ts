@@ -49,15 +49,16 @@ issuesはblockId(全体ならnull)、category、短いmessage。一般論の追�
 };
 const redact=(value:string,name:string)=>value.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,'[メールアドレス]')
   .replace(/(?:\+81[-\s]?|0)\d{1,4}[-\s]\d{1,4}[-\s]\d{3,4}/g,'[電話番号]').split(name||'\u0000').join(name?'[氏名]':'\u0000');
-export function generationContext(profile:Profile,question:Question,answers:AdditionalAnswer[]){
+export function generationContext(profile:Profile,question:Question,answers:AdditionalAnswer[],options:{raw?:boolean}={}){
   if(profile.organizationId!==question.organizationId||!profile.siteIds.includes(question.siteId))throw new Error('context-scope');
   if(question.status!=='resolved')throw new Error('source-not-resolved');
-  const sources=[{id:'question:'+question.id,role:'employee',text:redact(question.originalText,profile.name),japaneseReference:redact(question.japaneseText,profile.name)},
-    ...question.messages.map(message=>({id:message.id,role:message.role,text:redact(message.originalText,profile.name),japaneseReference:redact(message.translatedText,profile.name)})),
+  const text=(value:string)=>options.raw?value:redact(value,profile.name);
+  const sources=[{id:'question:'+question.id,role:'employee',text:text(question.originalText),japaneseReference:text(question.japaneseText)},
+    ...question.messages.map(message=>({id:message.id,role:message.role,text:text(message.originalText),japaneseReference:text(message.translatedText)})),
     {id:'resolved:'+question.id,role:'system',text:'スタッフが解決ボタンを押しました。成功した操作の特定を意味しません。',japaneseReference:''},
-    ...answers.map(answer=>({id:answer.id,role:'manager_supplement',text:redact(answer.answer,profile.name),japaneseReference:''}))];
-  const context={questionId:question.id,question:redact(question.japaneseText||question.originalText,profile.name),originalLanguage:question.originalLanguage,resolved:true,sources,
-    resolutionNote:redact(question.resolution,profile.name)};
+    ...answers.map(answer=>({id:answer.id,role:'manager_supplement',text:text(answer.answer),japaneseReference:''}))];
+  const context={questionId:question.id,question:text(question.japaneseText||question.originalText),originalLanguage:question.originalLanguage,resolved:true,sources,
+    resolutionNote:text(question.resolution)};
   const serialized=JSON.stringify(context);if(question.messages.length>50||Buffer.byteLength(serialized)>100_000)throw new Error('context-limit');
   if(new Set(sources.map(source=>source.id)).size!==sources.length)throw new Error('duplicate-source');
   return {context,hash:createHash('sha256').update(serialized).digest('hex'),bytes:Buffer.byteLength(serialized)};

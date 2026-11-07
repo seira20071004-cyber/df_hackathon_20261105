@@ -18,6 +18,7 @@ globalThis.fetch = async (url,options) => {
   const schema=request.generationConfig?.responseJsonSchema;
   const input=JSON.parse(request.contents[0].parts[0].text);
   const context=input.context??input;
+  const demo=process.env.BRIDGE_AI_FIXTURES==='true';
   if(context.question?.includes('APIタイムアウト'))throw new DOMException('mock deadline','TimeoutError');
   if(context.question?.includes('API障害'))return Response.json({error:{code:503,message:'mock unavailable',status:'UNAVAILABLE'}},{status:503});
   if(context.question?.includes('利用枠エラー'))return Response.json({error:{code:429,message:'mock quota',status:'RESOURCE_EXHAUSTED'}},{status:429});
@@ -49,7 +50,9 @@ globalThis.fetch = async (url,options) => {
   } else if(schema?.properties?.preserved) {
     result={preserved:true};
   } else if (schema?.properties?.text) {
-    result={text:typeof input==='string' ? input : input.value ?? '参考訳'};
+    const line=typeof input==='string'?input:input.value??'参考訳';
+    const translations={ja:'バーコードが読み取れません。どうすればよいですか？',en:'Check the barcode for dirt. Wipe it with a dry cloth and scan it again.',vi:'Hãy kiểm tra xem mã vạch có bị bẩn không. Lau bằng khăn khô rồi quét lại.'};
+    result={text:demo&&/mã vạch|バーコード|商品名/.test(line)&&input.target?(translations[input.target]??({'日本語':translations.ja,English:translations.en,'Tiếng Việt':translations.vi})[input.target]??line):line};
   } else if (schema?.properties?.ids) {
     result={ids:input.question.includes('全く違う')?[]:input.candidates.slice(0,1).map(candidate=>candidate.id)};
   } else {
