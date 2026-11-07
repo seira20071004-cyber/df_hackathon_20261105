@@ -31,6 +31,12 @@ test('confirmed evidence is literal; no repeated or fourth question',()=>{
  assert.equal(value.facts[0].state,'inferred');assert.equal(value.facts[0].sourceId,'');assert.deepEqual(value.secondary,['work_instruction']);
  assert.equal(nextClarification(value,['target','symptom','attempt']),null);
 });
+test('photo observations never confirm facts and local danger retains its evidence',()=>{
+ const ai=analysisSchema.parse({primary:'troubleshooting',secondary:[],risk:'normal',facts:[{field:'target',state:'confirmed',value:'Scanner',quote:'Scanner',sourceId:'photo:test'}],question:null});
+ const value=reconcileAnalysis(ai,[{id:'photo:test',text:'Scanner'},{id:'input',text:'chemical spill'}]);
+ assert.equal(value.facts[0].state,'inferred');
+ assert.equal(value.risk,'emergency');assert.deepEqual(value.riskEvidence,[{sourceId:'input',quote:'chemical spill'}]);
+});
 test('unknown IDs, duplicates, conditional, inapplicable and unsafe entries never pass',()=>{
  const ratings=[{id:'outside',verdict:'applicable'},{id:'yes',verdict:'applicable'},{id:'maybe',verdict:'needs_clarification'},{id:'duplicate',verdict:'applicable'},{id:'duplicate',verdict:'unsafe'},{id:'wrong',verdict:'not_applicable'}];
  assert.deepEqual(applicableIds(ratings,['yes','maybe','duplicate','wrong']),['yes']);

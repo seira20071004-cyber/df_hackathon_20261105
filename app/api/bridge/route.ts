@@ -2,6 +2,7 @@ import {z} from 'zod';
 import {NextRequest,NextResponse} from 'next/server';
 import {getAppCheck} from 'firebase-admin/app-check';
 import {applicationDefault,getApps,initializeApp} from 'firebase-admin/app';
+import {photoIntakeEnabled} from '../../../lib/consultation';
 import {documentDownload} from '../../../lib/documents';
 import {authenticate,isDemo,slug} from '../../../lib/storage';
 import {actionSchema,ApiError,execute,workspace} from '../../../lib/workflow';
@@ -29,7 +30,7 @@ async function run(request:NextRequest){
  let profile:Profile|null=null,operation='request',resourceId:string|undefined;
  try{
   if(isDemo()&&process.env.NODE_ENV==='production'&&process.env.BRIDGE_ALLOW_PUBLIC_DEMO!=='true')throw new SecurityError(503,'demo-disabled-in-production');
-  if(request.method==='GET'&&request.nextUrl.searchParams.has('config'))return reply({demo:isDemo(),appCheck:publicAppCheckConfig(process.env),googleAuth:publicGoogleAuth(process.env)});
+  if(request.method==='GET'&&request.nextUrl.searchParams.has('config'))return reply({demo:isDemo(),photoIntake:photoIntakeEnabled(),appCheck:publicAppCheckConfig(process.env),googleAuth:publicGoogleAuth(process.env)});
   if(request.method==='POST'){
    const origin=request.headers.get('origin');const allowed=(process.env.BRIDGE_ALLOWED_ORIGINS??'').split(',').filter(Boolean);
    const host=request.headers.get('host')??'';

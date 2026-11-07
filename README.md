@@ -33,6 +33,10 @@ npm run dev
 
 ## Firebase と Gemini の設定
 
+Googleで組織を作成・参加するには、Firebase Authentication の Google プロバイダーを有効にし、アプリのホスト名を承認済みドメインへ登録します。サーバーで `BRIDGE_DEMO=false`、`BRIDGE_GOOGLE_SIGN_IN=true`、`FIREBASE_PROJECT_ID`、`FIREBASE_WEB_API_KEY` と既存の Firebase Admin 用 ADC を設定します。組織を作った管理者は「メンバー」から期限・使用上限付きの招待コードを発行できます。
+
+相談時の写真解析は、組織の取り扱い方針を確認したうえで `BRIDGE_AI_PHOTO_ENABLED=true` を設定します。画像は検証してEXIF等を除いてからVertex AIへ送信し、原本は保存しません。モデルによる観察は推測として扱います。意味検索を有効にするには、Vertex AIで利用できる `GEMINI_EMBEDDING_MODEL` を設定します。埋め込みがない既存の公開マニュアルは、キーワード候補として引き続き再評価されます。旧データは任意の新項目なしでそのまま読み込めます。
+
 | 変数 | 用途 |
 | --- | --- |
 | `BRIDGE_DEMO` | `true` で架空データとデモアカウントを利用。Firebase 利用時は `false` |

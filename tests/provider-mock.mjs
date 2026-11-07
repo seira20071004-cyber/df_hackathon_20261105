@@ -24,7 +24,9 @@ globalThis.fetch = async (url,options) => {
   if(context.question?.includes('利用枠エラー'))return Response.json({error:{code:429,message:'mock quota',status:'RESOURCE_EXHAUSTED'}},{status:429});
   if(context.question?.includes('不正JSON'))return Response.json({candidates:[{content:{parts:[{text:'{"broken":'}]}}]});
   let result;
-  if(schema?.properties?.candidates&&input.chunks){
+  if(schema?.properties?.observation){
+    result={observation:'サンプル画像の観察（模擬応答）'};
+  } else if(schema?.properties?.candidates&&input.chunks){
     const chunk=input.chunks[0],ids=[chunk.id];
     const program={title:'入口マットの確認',description:'入口のマットを確認する作業',language:'ja',startBlockId:'inspect',blocks:[{id:'inspect',type:'step',title:'目視で確認',content:'マットの端が平らか確認してください。',supplement:'',restricted:false,authorizationSourceMessageIds:[],sourceMessageIds:ids,nextBlockId:'complete'},{id:'complete',type:'check',content:'マットの端は平らですか？ めくれがある場合は管理者へ連絡してください。',sourceMessageIds:ids,successNextBlockId:null,failureNextBlockId:null}]};
     result={candidates:[{program,type:'work_instruction',conditions:'入口マット',exclusions:'',questions:[],evidence:program.blocks.map(block=>({blockId:block.id,chunkId:chunk.id,quote:chunk.text.split('\n').at(-1)}))}]};
@@ -32,7 +34,10 @@ globalThis.fetch = async (url,options) => {
     const source=input.sources[0],text=source.text;
     const primary=/入口マット|entrance mat/i.test(text)?'work_instruction':/返金|シフト/.test(text)?'procedure':/洗剤|清掃場所/.test(text)?'work_instruction':/作業指示書|配送先/.test(text)?'information_support':'troubleshooting';
     const barcode=/バーコード|mã vạch/i.test(text),needs=demo&&barcode&&input.sources.length===1&&!/汚れ|機種|quầy|bẩn/i.test(text);
-    result={primary,secondary:[],risk:'normal',facts:[{field:'symptom',state:'confirmed',value:text.slice(0,200),sourceId:source.id,quote:text.slice(0,200)}],question:needs?{field:'situation',text:input.language==='vi'?'Bạn đang quét mã vạch ở đâu?':input.language==='en'?'Where are you scanning the barcode?':'どこでバーコードを読み取っていますか？',options:input.language==='vi'?['Tại quầy thu ngân']:input.language==='en'?['At the checkout']:['レジで']}:null};
+    if(text.includes('相談ラウンド確認')){
+      const rounds=[{field:'target',text:'どの機器ですか？',options:['レジ']},{field:'error',text:'どんな表示ですか？',options:['表示なし']},{field:'attempt',text:'何を試しましたか？',options:[]}];
+      result={primary:'troubleshooting',secondary:['work_instruction'],risk:'normal',facts:[],question:rounds[input.sources.length-1]??null};
+    }else result={primary,secondary:[],risk:'normal',facts:[{field:'symptom',state:'confirmed',value:text.slice(0,200),sourceId:source.id,quote:text.slice(0,200)}],question:needs?{field:'situation',text:input.language==='vi'?'Bạn đang quét mã vạch ở đâu?':input.language==='en'?'Where are you scanning the barcode?':'どこでバーコードを読み取っていますか？',options:input.language==='vi'?['Tại quầy thu ngân']:input.language==='en'?['At the checkout']:['レジで']}:null};
   } else if(schema?.properties?.decision){
     result={decision:'new_manual',manualId:null};
   } else if(schema?.properties?.ratings){

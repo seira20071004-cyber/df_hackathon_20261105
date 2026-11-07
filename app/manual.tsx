@@ -9,6 +9,7 @@ import { ManualEditor } from './manual-editor';
 import {ManualGuide,type ManualEvent} from './manual-guide';
 import {ProtectedSourceReview,type SourceAction} from './protected-source-review';
 import {ProgramEditor} from './program-editor';
+import {categoryLabels,type ManualApplicability} from '../lib/adaptive';
 import {ManualAccessEditor} from './manual-access-editor';
 import type {ManualAccess} from '../lib/manual-access';
 import type {StaffRecipient} from '../lib/model';
@@ -118,7 +119,7 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
   staff:StaffRecipient[];saveAccess:(access:ManualAccess)=>void;sourceAction:(action:SourceAction)=>void;
   regenerate: (imagesOnly:boolean) => void;
   save: (content:ManualContent,publish:boolean,edits?:ManualEdits) => void;
-  saveProgram:(program:ManualProgram,publish:boolean,confirmed:boolean)=>void;
+  saveProgram:(program:ManualProgram,publish:boolean,confirmed:boolean,applicability?:ManualApplicability)=>void;
   answer:(answers:{questionId:string;answer:string}[])=>void;
   changeState:(mode:'hold'|'unpublish'|'reject'|'archive')=>void;
   stats?:{uses:number;resolved:number;unresolved:number};
@@ -159,6 +160,7 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
     {manual.generation && !generating && ['queued','analyzing','checking_gaps','writing','validating','illustrating'].includes(state ?? '') &&
       <p className="notice">生成が中断された可能性があります。再生成して続行できます。</p>}
     {manual.reviewState==='awaiting_answers'&&manual.clarification&&<ClarificationForm key={'clarification-'+manual.id+manual.updatedAt} manual={manual} busy={busy} ai={ai} onAnswer={answer}/>}
+    {manual.applicability&&<section className="notice flow"><strong>{categoryLabels[manual.applicability.category]}</strong>{manual.applicability.target&&<p>対象：{manual.applicability.target}</p>}{manual.applicability.conditions&&<p>適用条件：{manual.applicability.conditions}</p>}{manual.applicability.exclusions&&<p>除外条件：{manual.applicability.exclusions}</p>}</section>}
     {manual.knowledgeSuggestion&&<p className="notice">ナレッジ整理の候補：{({new_manual:'新規作成',update_existing:'既存版の更新を検討',duplicate:'重複の可能性',skip:'作成を見送る候補'}[manual.knowledgeSuggestion.decision])}。管理者が内容を確認してください。</p>}
     {!!manual.feedback?.length&&<details className="pipeline-report"><summary>スタッフの報告 {manual.feedback.length}件</summary><ul>{manual.feedback.slice(-10).map((item,index)=><li key={index}>{({outdated:'情報が古い',incorrect:'内容が違う',unhelpful:'役に立たなかった'}[item.reason])} · {new Date(item.at).toLocaleDateString('ja-JP')}</li>)}</ul></details>}
     <div className="manual-metrics"><span>版 {manual.revision??1}</span><span>利用 {stats?.uses??0}</span><span>解決 {stats?.resolved??0}</span><span>未解決 {stats?.unresolved??0}</span></div>
@@ -220,7 +222,7 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
   </section>;
 }
 
-function ReviewApproval({manual,busy,onEdit,save,saveProgram}: {manual:Manual; busy:boolean; onEdit:()=>void; save:(content:ManualContent,publish:boolean)=>void;saveProgram:(program:ManualProgram,publish:boolean,confirmed:boolean)=>void}) {
+function ReviewApproval({manual,busy,onEdit,save,saveProgram}: {manual:Manual; busy:boolean; onEdit:()=>void; save:(content:ManualContent,publish:boolean)=>void;saveProgram:(program:ManualProgram,publish:boolean,confirmed:boolean,applicability?:ManualApplicability)=>void}) {
   const [checked,setChecked] = useState(false);
   return <div className="review-approval">
     <label className="check"><input type="checkbox" checked={checked} onChange={event=>setChecked(event.target.checked)}/>会話・追加情報との一致、作業条件、必要な作業権限を確認</label>

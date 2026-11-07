@@ -7,12 +7,12 @@ const labels={
  en:{clarify:'Tell us a little more',answer:'Type an answer',continue:'Continue search',safety:'Check safety first',safe:'Routine guidance has been paused. Follow your workplace safety procedure and contact the designated person or your manager directly.',handoff:'We could not confirm a matching procedure. You can ask a manager.',contact:'Contact'},
  vi:{clarify:'Hãy cho biết thêm',answer:'Nhập câu trả lời',continue:'Tiếp tục tìm',safety:'Kiểm tra an toàn trước',safe:'Đã tạm dừng hướng dẫn thông thường. Hãy làm theo quy trình an toàn tại nơi làm việc và liên hệ trực tiếp với người phụ trách.',handoff:'Chưa xác nhận được hướng dẫn phù hợp. Bạn có thể hỏi quản lý.',contact:'Liên hệ'}
 };
-export function AdaptiveIntake({details,language,busy,onAnswer}:{details:AdaptiveDetails;language:Language;busy:boolean;onAnswer:(field:string,text:string)=>void}){
+export function AdaptiveIntake({details,language,busy,round,onAnswer}:{details:AdaptiveDetails;language:Language;busy:boolean;round:number;onAnswer:(field:string,text:string)=>void}){
  const text=labels[language],[value,setValue]=useState('');
  if(details.mode==='safety')return <section className="panel flow safety-card" role="alert"><h2>{text.safety}</h2><p>{text.safe}</p>{details.safety?.instructions&&<p>{details.safety.instructions}</p>}{details.safety?.contact&&<p><strong>{text.contact}：</strong>{details.safety.contact}</p>}</section>;
  if(details.mode==='handoff')return <p className="notice">{text.handoff}</p>;
  const question=details.question;if(details.mode!=='clarify'||!question)return null;
- return <section className="panel flow intake-card"><h2>{text.clarify}</h2><p>{question.text}</p>
+ return <section className="panel flow intake-card"><span className="eyebrow">AI · {round}/3</span><h2>{text.clarify}</h2><p>{question.text}</p>
   {question.options.map((option,index)=><button className="secondary" key={index} disabled={busy} onClick={()=>onAnswer(question.field,option)}>{option}</button>)}
   <label>{text.answer}<input value={value} onChange={event=>setValue(event.target.value)} maxLength={500} disabled={busy}/></label>
   <button disabled={busy||!value.trim()} onClick={()=>onAnswer(question.field,value.trim())}>{text.continue}</button>

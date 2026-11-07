@@ -7,6 +7,7 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import test from 'node:test';
 import {PDFDocument} from 'pdf-lib';
+import sharp from 'sharp';
 import {seedDemo} from '../lib/demo.ts';
 
 test('SDK pipeline, supplements, approval, sessions and escalation remain scoped and durable',{timeout:120000},async t=>{
@@ -15,7 +16,7 @@ test('SDK pipeline, supplements, approval, sessions and escalation remain scoped
  seed.manuals.push({...structuredClone(seed.manuals[0]),id:'foreign-manual',organizationId:'other-company',content:{...seed.manuals[0].content,title:'他組織だけの秘密情報'}});
  await writeFile(join(folder,'data.json'),JSON.stringify(seed));
  const socket=createServer();await new Promise(resolve=>socket.listen(0,'127.0.0.1',resolve));const port=socket.address().port;await new Promise(resolve=>socket.close(resolve));
- const child=spawn(process.execPath,['--import',new URL('./provider-mock.mjs',import.meta.url).href,join(root,'node_modules/next/dist/bin/next'),...(process.env.BRIDGE_TEST_DEV==='true'?['dev','--webpack']:['start']),'-H','127.0.0.1','-p',String(port)],{cwd:root,env:{...process.env,BRIDGE_DEMO:'true',BRIDGE_PRIVACY_STRICT:'false',BRIDGE_SENSITIVE_PROVIDER:'local',GEMINI_API_KEY_SECRET:'',GEMINI_API_KEY_FILE:'',BRIDGE_ALLOW_PUBLIC_DEMO:'true',BRIDGE_USER_REQUESTS_PER_MINUTE:'10000',BRIDGE_ORG_REQUESTS_PER_MINUTE:'20000',BRIDGE_AI_CALLS_PER_MINUTE:'10000',BRIDGE_DEMO_DATA_DIR:folder,GEMINI_API_KEY:'test-fixture',GEMINI_PROVIDER:'developer',GOOGLE_GENAI_USE_VERTEXAI:'false',GEMINI_GENERATE_IMAGES:'false',GEMINI_EMBEDDING_MODEL:'test-embedding'},stdio:['ignore','pipe','pipe']});
+ const child=spawn(process.execPath,['--import',new URL('./provider-mock.mjs',import.meta.url).href,join(root,'node_modules/next/dist/bin/next'),...(process.env.BRIDGE_TEST_DEV==='true'?['dev','--webpack']:['start']),'-H','127.0.0.1','-p',String(port)],{cwd:root,env:{...process.env,BRIDGE_DEMO:'true',BRIDGE_PRIVACY_STRICT:'false',BRIDGE_SENSITIVE_PROVIDER:'local',GEMINI_API_KEY_SECRET:'',GEMINI_API_KEY_FILE:'',BRIDGE_ALLOW_PUBLIC_DEMO:'true',BRIDGE_USER_REQUESTS_PER_MINUTE:'10000',BRIDGE_ORG_REQUESTS_PER_MINUTE:'20000',BRIDGE_AI_CALLS_PER_MINUTE:'10000',BRIDGE_DEMO_DATA_DIR:folder,GEMINI_API_KEY:'test-fixture',GEMINI_PROVIDER:'developer',GOOGLE_GENAI_USE_VERTEXAI:'false',GEMINI_GENERATE_IMAGES:'false',GEMINI_EMBEDDING_MODEL:'test-embedding',BRIDGE_AI_PHOTO_ENABLED:'true'},stdio:['ignore','pipe','pipe']});
  let log='';child.stdout.on('data',data=>log+=data);child.stderr.on('data',data=>log+=data);
  t.after(async()=>{if(child.exitCode===null){const stopped=new Promise(resolve=>child.once('exit',resolve));child.kill();await stopped;}await rm(folder,{recursive:true,force:true});});
  const url='http://127.0.0.1:'+port+'/api/bridge';let ready=false;
@@ -61,6 +62,20 @@ test('SDK pipeline, supplements, approval, sessions and escalation remain scoped
  assert.equal((await api('sato',{action:'documentList'})).some(row=>row.id===privatePdf.id),false);
  assert.equal((await fetch(url+'?sourcePdf='+privatePdf.id+'&site=sakura',{headers:{Authorization:'Bearer sato'}})).status,404);
  assert.equal((await fetch(url+'?sourcePdf='+sourcePdf.id+'&site=outside',{headers:{Authorization:'Bearer sato'}})).status,404);
+ const intakeAnswers=[];
+ const intakeText='相談ラウンド確認：機器で困っています';
+ for(const field of ['target','error','attempt']){
+  const response=await api('linh',{action:'adaptiveSearch',text:intakeText,language:'ja',answers:intakeAnswers});
+  assert.equal(response.adaptive.mode,'clarify');assert.equal(response.adaptive.question.field,field);
+  intakeAnswers.push({field,prompt:response.adaptive.question.text,text:'分かる範囲で回答'});
+ }
+ const intakeHandoff=await api('linh',{action:'adaptiveSearch',text:intakeText,language:'ja',answers:intakeAnswers});
+ assert.equal(intakeHandoff.adaptive.mode,'handoff');
+ const asked=await api('linh',{action:'ask',id:randomUUID(),text:intakeText,language:'ja',intake:intakeAnswers});
+ assert.equal(asked.consultation.primary,'troubleshooting');assert.deepEqual(asked.consultation.secondary,['work_instruction']);assert.deepEqual(asked.intakeAnswers,intakeAnswers);
+ const attachment=await sharp({create:{width:20,height:20,channels:3,background:'#fff'}}).png().toBuffer();
+ const photoResult=await api('linh',{action:'adaptiveSearch',text:'Tôi không thể quét mã vạch.',language:'vi',answers:[],photo:attachment.toString('base64')});
+ assert.equal(photoResult.photoAnalyzed,true);
  const blocked=await api('linh',{action:'adaptiveSearch',text:'薬品がこぼれた',language:'ja',answers:[]});assert.equal(blocked.adaptive.mode,'safety');assert.deepEqual(blocked.matches,[]);
  const adaptive=await api('linh',{action:'adaptiveSearch',text:'Tôi không thể quét mã vạch.',language:'vi',answers:[]});assert.equal(adaptive.adaptive.analysis.primary,'troubleshooting');assert.ok(adaptive.matches.some(row=>row.id==='demo-interactive-manual'));assert.ok(!adaptive.matches.some(row=>row.id==='foreign-manual'));
  const assignedId=randomUUID();await api('linh',{action:'ask',id:assignedId,text:'担当者テスト',language:'ja'});

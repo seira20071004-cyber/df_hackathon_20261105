@@ -22,7 +22,7 @@ systemの解決イベントは「解決ボタンが押された」証拠だけ�
 短い判定理由だけを返し、内部の思考過程は出力しません。`;
 export const interactivePrompts={
   extract:policy+`
-工程1：問題のtitle、description、facts、unknownsを抽出します。facts.kindはsymptom/condition/scope/cause/action/result/warning/criterion/authorization。
+工程1：問題のtitle、description、facts、unknownsを抽出します。facts.kindはsymptom/target/condition/exclusion/scope/cause/attempt/action/result/warning/criterion/authorization。targetは対象物、exclusionは明示された対象外条件、attemptは成功が確認できない試行や失敗した操作です。attemptを手順に含めません。
 各factにid、currentかsupersededか、evidence(messageId,quote)を添えます。引用はsources.textの一字一句一致する部分です。
 causeKnownは原因が確認済みか、hasAlternativeMethodsは順番に行う一連の手順ではなく複数の代替手段が提示されたかを表します。
 successfulActionIdsは成功したと確認できるactionのfact idだけ。不明なら空配列です。解決ボタンだけで特定しません。
@@ -34,7 +34,7 @@ successfulActionIdsは成功したと確認できるactionのfact idだけ。不
 previousQuestionsとanswersを読み、回答済みの同じ質問を繰り返しません。重要な不足があればready=false。危険で回答だけでは扱えない場合hold=true。
 情報がそろえばready=true,hold=false,questions=[]。成功した操作が不明な複数代替手段を確定手順として公開してはいけません。`,
   design:policy+`
-工程3：current factsだけから必要なUIブロックを選びます。languageはja。STEPは1動作、BRANCHは確認済み条件、WARNINGは根拠ある注意、CHECKは管理者が示した解決基準。
+工程3：current factsだけから必要なUIブロックを選びます。attemptを解決手順に含めない。troubleshootingは裏づけのある分岐、procedureは順番と明記された承認を分ける、work_instructionは確認できる作業項目、information_supportは用語と説明を優先します。裏づけが足りない場合にブロックの種類を強制しません。languageはja。STEPは1動作、BRANCHは確認済み条件、WARNINGは根拠ある注意、CHECKは管理者が示した解決基準。
 step: title,content,supplement,nextBlockId,restricted,authorizationSourceMessageIds。危険作業はrestricted=trueで許可の根拠が必須。不明なら操作を書かず管理者に確認します。
 branch: question,choices[{id,label,nextBlockId}]。各選択肢は2～4個。意味のない分岐を作りません。
 warning: content,severity(notice/stop),nextBlockId。stopは必ずnextBlockId=null。一般的な安全知識を創作しません。
@@ -71,7 +71,7 @@ export function extractionIssues(extracted:ExtractedChat,context:Context){
   if(new Set(extracted.facts.map(fact=>fact.id)).size!==extracted.facts.length)issues.push('事実IDの重複');
   for(const fact of extracted.facts)for(const citation of fact.evidence){const source=sourceMap.get(citation.messageId);
     if(!source?.text.includes(citation.quote))issues.push(`${fact.id}: 引用が存在しません`);
-    if(!['symptom','result'].includes(fact.kind)&&!['manager','manager_supplement'].includes(source?.role??''))issues.push(`${fact.id}: 管理者の根拠がありません`);
+    if(!['symptom','target','attempt','result'].includes(fact.kind)&&!['manager','manager_supplement'].includes(source?.role??''))issues.push(`${fact.id}: 管理者の根拠がありません`);
   }
   if(extracted.successfulActionIds.some(id=>!extracted.facts.some(fact=>fact.id===id&&fact.kind==='action'&&fact.status==='current')))issues.push('成功した操作の参照が不正です');
   return [...new Set(issues)];

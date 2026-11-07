@@ -3,12 +3,17 @@ import {useState,type FormEvent} from 'react';
 import {blockText,graphIssues,programSchema,type ManualBlock,type ManualProgram} from '../lib/manual-graph';
 import type {Manual} from '../lib/model';
 import {ManualGuide} from './manual-guide';
+import {categoryLabels,types,type ManualApplicability} from '../lib/adaptive';
 
-export function ProgramEditor({manual,busy,onSave}:{manual:Manual;busy:boolean;onSave:(program:ManualProgram,publish:boolean,confirmed:boolean)=>void}){
+export function ProgramEditor({manual,busy,onSave}:{manual:Manual;busy:boolean;onSave:(program:ManualProgram,publish:boolean,confirmed:boolean,applicability?:ManualApplicability)=>void}){
   const [program,setProgram]=useState<ManualProgram>(()=>structuredClone(manual.program!));
+  const initial=manual.applicability??{category:manual.consultationType??'unknown',secondary:[],target:'',conditions:manual.sourceDocument?.conditions??'',exclusions:manual.sourceDocument?.exclusions??''};
+  const [applicability,setApplicability]=useState<ManualApplicability>(initial);
+  const applicabilityChanged=JSON.stringify(initial)!==JSON.stringify(applicability);
+  function changeApplicability(update:Partial<ManualApplicability>){setApplicability(current=>({...current,...update}));setConfirmed(false);}
   const [confirmed,setConfirmed]=useState(false),[preview,setPreview]=useState(false),[type,setType]=useState<ManualBlock['type']>('step');
   const parsed=programSchema.safeParse(program),issues=parsed.success?graphIssues(program):['未入力の項目や文字数を確認してください'];
-  const changed=JSON.stringify(program)!==JSON.stringify(manual.program);
+  const changed=JSON.stringify(program)!==JSON.stringify(manual.program)||applicabilityChanged;
   function change(id:string,update:Partial<ManualBlock>){setProgram(current=>({...current,blocks:current.blocks.map(block=>block.id===id?{...block,...update} as ManualBlock:block)}));setConfirmed(false);}
   function target(value:string|null,onChange:(next:string|null)=>void,currentId:string,label='次のブロック'){
     return <label>{label}<select value={value??''} disabled={busy} onChange={event=>onChange(event.target.value||null)}><option value="">管理者へ確認</option>
@@ -26,14 +31,24 @@ export function ProgramEditor({manual,busy,onSave}:{manual:Manual;busy:boolean;o
       block.type==='check'?{...block,failureNextBlockId:block.failureNextBlockId===id?null:block.failureNextBlockId}:{...block,nextBlockId:block.nextBlockId===id?null:block.nextBlockId});
     return {...current,startBlockId:current.startBlockId===id?blocks[0].id:current.startBlockId,blocks};
   });setConfirmed(false);}
-  function submit(event:FormEvent<HTMLFormElement>){event.preventDefault();if(issues.length)return;const publish=(event.nativeEvent as SubmitEvent).submitter?.getAttribute('value')==='publish';if(publish&&!confirmed)return;onSave(program,publish,confirmed);}
+  function submit(event:FormEvent<HTMLFormElement>){event.preventDefault();if(issues.length)return;const publish=(event.nativeEvent as SubmitEvent).submitter?.getAttribute('value')==='publish';if(publish&&!confirmed)return;onSave(program,publish,confirmed,applicabilityChanged?applicability:undefined);}
   return <form className="flow program-editor" onSubmit={submit}>
     <h3>対話型マニュアルを編集</h3><p className="muted">ブロックの内容と遷移先を編集します。管理者による変更は元チャットとは別の確認済み情報として記録します。</p>
     <label>タイトル<input required maxLength={500} value={program.title} disabled={busy} onChange={event=>{setProgram(current=>({...current,title:event.target.value}));setConfirmed(false);}}/></label>
     <label>概要<textarea maxLength={700} rows={2} value={program.description} disabled={busy} onChange={event=>{setProgram(current=>({...current,description:event.target.value}));setConfirmed(false);}}/></label>
+    <label>主カテゴリ<select value={applicability.category} disabled={busy} onChange={event=>{
+      const category=event.target.value as ManualApplicability['category'];
+      changeApplicability({category,secondary:applicability.secondary.filter(item=>item!==category)});
+    }}>{types.map(item=><option value={item} key={item}>{categoryLabels[item]}</option>)}</select></label>
+    <fieldset><legend>副カテゴリ</legend>{types.filter(item=>item!=='unknown'&&item!==applicability.category).map(item=><label className="check" key={item}>
+      <input type="checkbox" checked={applicability.secondary.includes(item)} disabled={busy} onChange={event=>changeApplicability({secondary:event.target.checked?[...applicability.secondary,item].slice(0,3):applicability.secondary.filter(value=>value!==item)})}/>{categoryLabels[item]}</label>)}</fieldset>
+    <label>対象物<input value={applicability.target} maxLength={240} disabled={busy} onChange={event=>changeApplicability({target:event.target.value})}/></label>
+    <label>適用条件<textarea value={applicability.conditions} maxLength={500} disabled={busy} onChange={event=>changeApplicability({conditions:event.target.value})}/></label>
+    <label>除外条件<textarea value={applicability.exclusions} maxLength={500} disabled={busy} onChange={event=>changeApplicability({exclusions:event.target.value})}/></label>
     <label>開始ブロック<select value={program.startBlockId} disabled={busy} onChange={event=>{setProgram(current=>({...current,startBlockId:event.target.value}));setConfirmed(false);}}>{program.blocks.map(block=><option key={block.id} value={block.id}>{block.id} · {blockText(block).slice(0,40)}</option>)}</select></label>
     {program.blocks.map((block,index)=><fieldset key={block.id} className={'program-edit-block '+block.type}><legend>{index+1} · {block.type.toUpperCase()} · {block.id}</legend>
       {block.type==='step'?<><label>短いタイトル<input required maxLength={500} value={block.title} disabled={busy} onChange={event=>change(block.id,{title:event.target.value})}/></label>
+        <label>表示形式<select value={block.presentation??''} disabled={busy} onChange={event=>change(block.id,{presentation:(event.target.value||undefined) as typeof block.presentation})}><option value="">カテゴリに合わせる</option><option value="instruction">通常手順</option><option value="checklist">チェック項目</option><option value="explanation">説明</option><option value="approval">承認の確認</option></select></label>
         <label>操作説明<textarea required maxLength={500} value={block.content} disabled={busy} onChange={event=>change(block.id,{content:event.target.value})}/></label>
         <label>補足情報<textarea maxLength={500} value={block.supplement} disabled={busy} onChange={event=>change(block.id,{supplement:event.target.value})}/></label>
         <label className="check"><input type="checkbox" checked={block.restricted} disabled={busy} onChange={event=>change(block.id,{restricted:event.target.checked})}/>作業権限の確認が必要な操作</label>

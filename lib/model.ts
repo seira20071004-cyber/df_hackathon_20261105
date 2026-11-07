@@ -29,7 +29,7 @@ export interface Question {
   organizationId: string;
   siteId: string;
   consultation?:import('./adaptive').Analysis;
-  intakeAnswers?:{field:string;text:string}[];
+  intakeAnswers?:{field:string;text:string;prompt?:string}[];
   assigneeId?:string;
   assigneeName?:string;
   assignments?:{by:string;to:string;at:string}[];
@@ -81,6 +81,7 @@ export interface Manual {
   publicationSuppressed?:boolean;
   security?:{contentHash:string;inspection:import('./security-content').Inspection;checkedAt:string};
   consultationType?:import('./adaptive').ConsultationType;
+  applicability?:import('./adaptive').ManualApplicability;
   riskLevel?:import('./adaptive').Risk;
   sourceDocument?:{id:string;share:boolean;references:import('./document-types').PdfReference[];conditions?:string;exclusions?:string};
   authored?:boolean;

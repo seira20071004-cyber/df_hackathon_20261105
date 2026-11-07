@@ -19,7 +19,7 @@ export type ManualBlock=z.infer<typeof blockSchema>;
 export const factEvidence=z.object({messageId:z.string().min(1).max(180),quote:z.string().trim().min(1).max(1500)});
 export const extractedChatSchema=z.object({
   title:text,description:z.string().max(700),
-  facts:z.array(z.object({id,kind:z.enum(['symptom','condition','scope','cause','action','result','warning','criterion','authorization']),
+  facts:z.array(z.object({id,kind:z.enum(['symptom','target','condition','exclusion','scope','cause','attempt','action','result','warning','criterion','authorization']),
     text,status:z.enum(['current','superseded']),evidence:z.array(factEvidence).min(1).max(4)})).max(32),
   unknowns:z.array(text).max(8),causeKnown:z.boolean(),hasAlternativeMethods:z.boolean(),successfulActionIds:z.array(id).max(12)
 });

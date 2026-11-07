@@ -1,7 +1,7 @@
 import {appCheckConfigSchema,type PublicAppCheck} from './app-check-schema.ts';
 type TokenSource={getToken:(forceRefresh:boolean)=>Promise<string>};
 type Options={fetcher:typeof fetch;loadTokenSource:(config:Extract<PublicAppCheck,{enabled:true}>)=>Promise<TokenSource>;timeoutMs?:number};
-const configSchema=(value:unknown)=>{const data=value as {demo?:unknown;appCheck?:unknown};if(!data||typeof data.demo!=='boolean')throw new Error('app-check-unavailable');return {demo:data.demo,appCheck:appCheckConfigSchema.parse(data.appCheck),googleAuth:(data as {googleAuth?:unknown}).googleAuth};};
+const configSchema=(value:unknown)=>{const data=value as {demo?:unknown;appCheck?:unknown;photoIntake?:unknown};if(!data||typeof data.demo!=='boolean')throw new Error('app-check-unavailable');return {demo:data.demo,...(typeof data.photoIntake==='boolean'?{photoIntake:data.photoIntake}:{}),appCheck:appCheckConfigSchema.parse(data.appCheck),googleAuth:(data as {googleAuth?:unknown}).googleAuth};};
 async function deadline<T>(work:Promise<T>,ms:number):Promise<T>{let timer:ReturnType<typeof setTimeout>|undefined;try{return await Promise.race([work,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('app-check-unavailable')),ms);})]);}finally{if(timer)clearTimeout(timer);}}
 export function createBridgeTransport({fetcher,loadTokenSource,timeoutMs=15000}:Options){
  let configuration:Promise<ReturnType<typeof configSchema>>|undefined,source:Promise<TokenSource>|undefined;

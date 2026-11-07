@@ -4,9 +4,12 @@ export const types=['troubleshooting','procedure','work_instruction','informatio
 export const risks=['normal','caution','emergency','unknown'] as const;
 export type ConsultationType=typeof types[number];
 export type Risk=typeof risks[number];
+export const manualApplicabilitySchema=z.object({category:z.enum(types),secondary:z.array(z.enum(types)).max(3),target:z.string().trim().max(240),conditions:z.string().trim().max(500),exclusions:z.string().trim().max(500)}).strict();
+export type ManualApplicability=z.infer<typeof manualApplicabilitySchema>;
 const fields=['target','symptom','situation','error','attempt','result','missing'] as const;
 export const analysisSchema=z.object({
  primary:z.enum(types),secondary:z.array(z.enum(types)).max(3),risk:z.enum(risks),
+ riskEvidence:z.array(z.object({sourceId:z.string().max(180),quote:z.string().min(1).max(240)})).max(4).optional(),
  facts:z.array(z.object({field:z.enum(fields),state:z.enum(['confirmed','inferred','unknown','conflicting']),value:z.string().max(240),sourceId:z.string().max(180),quote:z.string().max(240)})).max(14),
  question:z.object({field:z.enum(fields),text:z.string().min(1).max(200),options:z.array(z.string().min(1).max(100)).max(4)}).nullable()
 });
@@ -14,7 +17,8 @@ export const evaluationSchema=z.object({ratings:z.array(z.object({id:z.string(),
 export const knowledgeSchema=z.object({decision:z.enum(['new_manual','update_existing','duplicate','skip']),manualId:z.string().max(120).nullable()});
 export type Analysis=z.infer<typeof analysisSchema>;
 export type Clarification=z.infer<typeof analysisSchema>['question'];
-export type AnalysisSource={id:string;text:string};
+export type AnalysisSource={id:string;text:string;prompt?:string};
+export const categoryLabels:Record<ConsultationType,string>={troubleshooting:'トラブル解決',procedure:'業務手続き',work_instruction:'作業方法',information_support:'情報・翻訳',unknown:'分類不明'};
 export type AdaptiveDetails={analysis:Analysis;question:Clarification;mode:'results'|'clarify'|'safety'|'handoff';safety?:{contact:string;instructions:string}};
 export const guidance:Record<ConsultationType,string>={
  troubleshooting:'対象機種、症状、エラー表示、試した操作と結果を確認。候補を区別できる条件を優先。条件分岐は裏づけがある場合のみ。',
@@ -35,11 +39,18 @@ export function reconcileAnalysis(ai:Analysis|null,sources:AnalysisSource[],keyw
  const risk=local==='unknown'?modelRisk:order.indexOf(local)>order.indexOf(modelRisk)?local:modelRisk;
  const facts=(ai?.facts??[]).map(row=>{
   const supported=Boolean(row.quote&&sources.some(source=>source.id===row.sourceId&&source.text.includes(row.quote)));
+  if(row.sourceId.startsWith('photo:'))return {...row,state:'inferred' as const,sourceId:supported?row.sourceId:'',quote:supported?row.quote:''};
   if(!supported)return {...row,state:row.state==='unknown'?'unknown' as const:'inferred' as const,sourceId:'',quote:''};
   return {...row,value:row.state==='confirmed'?row.quote:row.value};
  });
  const primary=ai?.primary??'unknown';
- return {primary,secondary:[...new Set(ai?.secondary??[])].filter(type=>type!==primary&&type!=='unknown'),risk,facts,question:ai?.question??null};
+ const citedRisk=ai?.riskEvidence?.filter(row=>sources.some(source=>source.id===row.sourceId&&source.text.includes(row.quote)))??[];
+ const riskEvidence=local==='unknown'?citedRisk:sources.flatMap(source=>{
+  const slices=source.text.match(/[^。！？\n]{1,240}/gu)??[];
+  const quote=slices.find(slice=>explicitRisk(slice,keywords)===local);
+  return quote?[{sourceId:source.id,quote}]:[];
+ }).slice(0,4);
+ return {primary,riskEvidence,secondary:[...new Set(ai?.secondary??[])].filter(type=>type!==primary&&type!=='unknown'),risk,facts,question:ai?.question??null};
 }
 export function nextClarification(analysis:Analysis,priorFields:string[],candidate?:Clarification){
  if(priorFields.length>=3||analysis.risk==='emergency'||analysis.risk==='caution')return null;
@@ -52,5 +63,5 @@ export function applicableIds(ratings:z.infer<typeof evaluationSchema>['ratings'
 export function compatibleCodes(query:string,document:string){
  const codes=(value:string)=>value.toUpperCase().match(/\b(?:ERR(?:OR)?[-_ ]?|[EF][-_]?)\d{2,6}\b/g)?.map(code=>code.replace(/[-_ ]/g,''))??[];
  const requested=codes(query),recorded=codes(document);
- return !requested.length||!recorded.length||requested.some(code=>recorded.includes(code));
+ return !requested.length||!recorded.length||requested.every(code=>recorded.includes(code));
 }
