@@ -7,6 +7,7 @@ import {createServer} from 'node:net';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {seedDemo} from '../lib/demo.ts';
+import {createBridgeTransport} from '../lib/bridge-transport.ts';
 const root=fileURLToPath(new URL('../',import.meta.url));
 async function server(t,overrides={}){
  await mkdir(join(root,'.bridge-work'),{recursive:true});const folder=await mkdtemp(join(root,'.bridge-work','security-'));
@@ -20,6 +21,9 @@ async function server(t,overrides={}){
 }
 test('API security: auth, tenant isolation, privilege changes, unpublished drafts and fixed approvals',{timeout:90000},async t=>{
  const {api,url,folder,logs}=await server(t);
+ const browser=createBridgeTransport({fetcher:(path,init)=>fetch(new URL(path,url),init),loadTokenSource:async()=>{throw Error('disabled App Check must not load');}});
+ assert.equal((await (await browser('?config')).json()).appCheck.enabled,false);
+ assert.equal((await (await browser('',{headers:{Authorization:'Bearer sato'}})).json()).profile.role,'manager');
  await api('',undefined,401);await api('invalid',undefined,401);await api('alex',undefined,401,{'X-Bridge-Organization':'foreign'});
  const manager=(await api('sato')).value,manual=manager.manuals.find(m=>m.id==='demo-interactive-manual');
  assert.ok(!manager.manuals.some(m=>m.id==='foreign-private'));assert.ok(!manager.questions.some(q=>q.id==='foreign-chat'));
@@ -60,4 +64,10 @@ test('request abuse is denied with retry hints and explicit demo/App Check gates
  const limited=await server(t,{BRIDGE_USER_REQUESTS_PER_MINUTE:'2'});await limited.api('alex');await limited.api('alex');const denied=await limited.api('alex',undefined,429);assert.equal(denied.response.headers.get('retry-after'),'60');assert.ok(limited.logs().includes('rate-limited'));
  const gated=await server(t,{BRIDGE_APP_CHECK_ENFORCE:'true'});await gated.api('alex',undefined,403);
  const production=await server(t,{BRIDGE_ALLOW_PUBLIC_DEMO:'false'});await production.api('alex',undefined,503);
+});
+test('runtime App Check config and CSP stay in sync without exposing Gemini credentials',{timeout:90000},async t=>{
+ const appId='1:123:web:configured',service=await server(t,{BRIDGE_APP_CHECK_ENFORCE:'true',BRIDGE_APP_CHECK_APP_IDS:appId,BRIDGE_APP_CHECK_SITE_KEY:'public-site-key',FIREBASE_WEB_API_KEY:'public-firebase-key',FIREBASE_WEB_APP_ID:appId,FIREBASE_PROJECT_ID:'fixture-project',GEMINI_API_KEY:'server-private-fixture'});
+ const response=await fetch(service.url+'?config'),config=await response.json();assert.equal(config.appCheck.configured,true);assert.equal(config.appCheck.firebase.apiKey,'public-firebase-key');assert.ok(!JSON.stringify(config).includes('server-private-fixture'));
+ const page=await fetch(service.url.replace('/api/bridge',''));const policy=page.headers.get('content-security-policy');assert.ok(policy.includes('content-firebaseappcheck.googleapis.com'));assert.ok(policy.includes("frame-ancestors 'none'"));assert.equal(page.headers.get('x-frame-options'),'DENY');
+ await service.api('alex',undefined,403);
 });

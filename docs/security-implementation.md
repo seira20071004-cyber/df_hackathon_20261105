@@ -43,7 +43,7 @@ Google Sensitive Data Protection接続口はADCで `content:inspect` を呼び�
 
 - Firebase Authentication / Firestore：既存認証を再利用し、保存層の認可、承認版、組織別監査、共有カウンターを追加。
 - Sensitive Data Protection：ADCによる検査アダプターを実装。未有効化・実接続未検証。
-- Firebase App Check：既存Admin SDKでトークン検証・アプリID制限を実装。ブラウザでのトークン取得処理は未追加、現時点では無効を維持する。
+- Firebase App Check：既存Admin SDKでトークン検証・アプリID制限を実装。ブラウザでの取得・自動更新・API送信も追加した。クラウド設定と実トークン検証は未完了のため、現時点では無効を維持する。[接続手順](app-check-setup.md)を参照。
 - Cloud Logging：Cloud Runで収集できるJSON構造化ログを出力。実際のログシンク・閲覧IAM・保持期間の設定は未実施。
 - Vertex AI：既存のADC経路を維持し、本番の第一候補とする。Developer APIから勝手に切替えない。
 - Secret Manager：Cloud Runでマウントしたファイルを `GEMINI_API_KEY_FILE` で読み込む接続口を追加。シークレット作成・アクセス付与・マウントは未実施。
@@ -89,6 +89,7 @@ Google Sensitive Data Protection接続口はADCで `content:inspect` を呼び�
 | `BRIDGE_DLP_PROJECT` | 検査プロジェクト。未設定ならGOOGLE_CLOUD_PROJECT |
 | `BRIDGE_APP_CHECK_ENFORCE` | トークン検証を強制する場合true。クライアント設定前はfalse |
 | `BRIDGE_APP_CHECK_APP_IDS` | 許可するFirebaseアプリIDのカンマ区切り。強制時は必須 |
+| `BRIDGE_APP_CHECK_CLIENT_ENABLED` / `BRIDGE_APP_CHECK_SITE_KEY` / `FIREBASE_WEB_APP_ID` | ブラウザSDKの有効化、公開サイトキー、WebアプリID。詳細は接続手順 |
 | `BRIDGE_ALLOWED_ORIGINS` | プロキシの内部Originと異なる公開URLの正確なOrigin。カンマ区切り、ワイルドカードなし |
 | `BRIDGE_USER_REQUESTS_PER_MINUTE` | 既定90 |
 | `BRIDGE_ORG_REQUESTS_PER_MINUTE` | 既定900 |
@@ -96,7 +97,7 @@ Google Sensitive Data Protection接続口はADCで `content:inspect` を呼び�
 | `BRIDGE_AI_CONCURRENCY` | 既定4。AI呼び出しの同時リース数、リース期限120秒 |
 | `GEMINI_API_KEY_FILE` | Secret Managerマウントの絶対パス。環境変数GEMINI_API_KEYがあればそちらを優先 |
 
-Firebase、Geminiモデル、Vertex ADC等の既存変数は維持する。APIキーはクライアント設定へ渡さない。
+Firebase、Geminiモデル、Vertex ADC等の既存変数は維持する。Geminiのキーやサービスアカウントの秘密情報はクライアント設定へ渡さない。App CheckのFirebase Web設定には専用の公開キーを使用する。
 
 ## Google Cloud側の準備（未実施）
 
@@ -104,18 +105,18 @@ Firebase、Geminiモデル、Vertex ADC等の既存変数は維持する。API�
 2. 承認後にSensitive Data Protection APIを有効化し、実行主体へ `dlp.content.inspect` を含む最小権限を付与する。対象プロジェクト・リージョン・検出器・費用・データ取り扱いを確認する。現在の実装はglobalエンドポイントを使う。[検査設定](https://docs.cloud.google.com/sensitive-data-protection/docs/reference/rest/v2/InspectConfig)、[IAM](https://docs.cloud.google.com/sensitive-data-protection/docs/access-control/roles-permissions)。
 3. Vertex AI利用時は必要なモデルと実行主体の権限を確認する。キー方式を残す場合はSecret Managerの特定シークレットだけにAccessorを付与し、Cloud Runへマウントする。[マウント手順](https://docs.cloud.google.com/run/docs/configuring/services/secrets)。
 4. Firestoreの監査・制限コレクションへサーバーがアクセスできるIAMを確認する。クライアントRulesは全拒否。制限レコードのTTLを有効化する場合は `expireAt` を指定する。TTL未設定でも期限判定はアプリで行うが、不要なレコードは自動削除されない。
-5. App Checkを採用する場合はWebアプリ登録・プロバイダー設定・ブラウザSDKによるトークン送信を追加し、実トークンで検証してから強制する。[公式バックエンド検証](https://firebase.google.com/docs/app-check/custom-resource-backend)。CSPも採用するクライアントプロバイダーに合わせて調整する必要がある。
+5. App Checkを採用する場合はWebアプリ登録・プロバイダー設定・追加済みのブラウザSDKと実トークンで検証してから強制する。[公式バックエンド検証](https://firebase.google.com/docs/app-check/custom-resource-backend)。CSPは実行時の設定に合わせて生成する。
 6. Cloud Loggingの閲覧者・ログ保持・アクセス拒否や利用超過のアラートを設定する。アプリの監査ドキュメントの閲覧APIは未提供。クラウド側のIAMで閲覧を制限する。
 
 これらの有効化・IAM・課金・本番設定変更はユーザーの確認後に行う。
 
 ## テスト範囲と残る確認
 
-2026-11-07の最終検証：本番ビルド成功（TypeScript検証を含む）、自動テスト33件成功・失敗0件。クライアントバンドルにサーバーのキー設定・Admin SDKが含まれないことも検査した。Windowsの一時的なビルドディレクトリ作成エラーは、旧ビルドをワークスペース内へ退避して再ビルドすることで解消した。
+前回の検証：本番ビルド成功（TypeScript検証を含む）、自動テスト33件成功・失敗0件。今回のApp Check追加・SDK更新後の検証結果は [追加報告](app-check-setup.md) を参照。クライアントバンドルにサーバーのキー設定・Admin SDKが含まれないことも検査した。Windowsの一時的なビルドディレクトリ作成エラーは、旧ビルドをワークスペース内へ退避して再ビルドすることで解消した。
 
-共有デモの再起動は実行環境から追加承認を要求され、当該承認方式が無効のため拒否された。ネットワーク権限の許可後も起動できなかったため、新しいUIのブラウザ操作と共有URLの稼働は未確認。今回のUI検証を完了したとは報告しない。
+共有デモの再起動は実行環境から追加承認を要求され、当該承認方式が無効のため拒否された。ネットワーク権限の許可後も起動できなかったため、新しいUIのブラウザ操作と共有URLの稼働は未確認。その後、外部公開しない開発サーバーで管理者の未保存公開ガードとスタッフのモバイル表示を確認した。共有デモの復旧とは区別する。
 
-本番ビルド、TypeScript、Nodeテストで検証。外部GeminiはHTTP境界をモックし、Sensitive Data Protectionは検査関数の注入で検証する。実Firebase認証・App Checkの実トークン・実DLP・実Vertex・Firestore複数インスタンスは未検証。
+検証方法は本番ビルド、TypeScript、Nodeテスト。今回の最終本番ビルドは環境のEPERMで未完了のため、更新後の本番統合テスト成功とは報告しない。外部GeminiはHTTP境界をモックし、Sensitive Data Protectionは検査関数の注入で検証する。実Firebase認証・App Checkの実トークン・実DLP・実Vertex・Firestore複数インスタンスは未検証。
 
 | 要求ケース | 検証 |
 |---|---|
@@ -140,7 +141,7 @@ Firebase、Geminiモデル、Vertex ADC等の既存変数は維持する。API�
 | 同一版承認・旧公開版保持・却下・非公開化 | 実装済み、API検証済み |
 | Firestore共有レート制限・期限付きAIリース | コード実装済み、状態遷移検証済み。実複数インスタンス検証は未実施 |
 | 監査 | 構造化出力とFirestore保存を実装。Cloud Logging収集・閲覧権限・保持・永続化失敗は実環境未検証 |
-| App Check | バックエンドのみ一部実装。クライアント取得・実トークン検証未実装/未実施 |
+| App Check | ブラウザ/バックエンドのコードとモック検証を実装。クラウド設定・実トークン検証は未実施 |
 | Secret Manager / Vertexの最小権限 | 接続口と既存ADC経路あり。クラウド設定・IAM監査は未実施 |
 | 画像内機密情報・ウイルス検査 | 未実装。画像は再デコードするが安全を完全保証しない。厳格モードでは画像付き公開を停止 |
 | 複数組織のUI・招待・管理者昇格 | 未実装。標準所属と任意のサーバー管理メンバー検証のみ |

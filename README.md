@@ -1,5 +1,7 @@
 # Bridge Work
 
+App Checkのブラウザ連携、設定方法、依存関係更新、今回の検証範囲は [接続・追加報告](docs/app-check-setup.md) を参照してください。ローカル開発画面は `npm run dev -- --hostname 127.0.0.1 --port 3003` で起動できます。外部共有リンクとは別です。
+
 セキュリティ強化の所見・設定・検証範囲・本番前チェックは [監査結果](docs/security-audit.md) と [実装報告](docs/security-implementation.md) を参照してください。本番はFirebase認証と機密検査を前提とし、検査できない場合はAI送信・公開を停止します。固定IDのデモは実データに使わないでください。`next start` で架空デモを動かす場合のみ、`BRIDGE_ALLOW_PUBLIC_DEMO=true` を明示します。クラウドサービスの有効化・課金・IAM設定は自動実行していません。
 
 対話型マニュアルの現行仕様・変更ファイル・環境変数・検証範囲は [実装資料](docs/interactive-manuals.md) を参照してください。Geminiによる情報抽出 → 不足情報の確認 → ブロック構成 → 品質検証 → 管理者承認を実装しています。従来構成の背景は [旧設計資料](docs/google-manual-architecture.md) にあります。実モデルの精度はAPI接続後に別途測定します。

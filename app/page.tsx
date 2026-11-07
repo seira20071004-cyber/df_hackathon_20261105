@@ -5,6 +5,7 @@ import { copy } from '../lib/copy';
 import { ManualReview, ManualView, isGenerating } from './manual';
 import {ManualInbox,ManualSend} from './manual-delivery';
 import {Settings,WorkspaceShell,type AppTab} from './workspace-shell';
+import {bridgeFetch} from './app-check';
 import type {ManualEvent} from './manual-guide';
 import { languageNames, languages, type Language, type Manual, type Match, type Question, type Workspace } from '../lib/model';
 
@@ -50,7 +51,7 @@ export default function BridgeWork() {
   const t = (key: Parameters<typeof copy>[1]) => copy(language,key);
 
   const request = useCallback(async <T,>(auth: string, payload?: object, suffix = ''): Promise<T> => {
-    const response = await fetch('/api/bridge' + suffix, {
+    const response = await bridgeFetch(suffix, {
       cache: 'no-store', method: payload ? 'POST' : 'GET',
       headers: {Authorization: 'Bearer ' + auth, ...(payload ? {'Content-Type':'application/json'} : {})},
       body: payload ? JSON.stringify(payload) : undefined
@@ -73,7 +74,7 @@ export default function BridgeWork() {
     setToken(auth);
   }, [refresh]);
   useEffect(() => {
-    request<{demo:boolean}>('',undefined,'?config').then(value => setDemo(value.demo)).catch(() => setError('server-error'));
+    request<{demo:boolean}>('',undefined,'?config').then(value => setDemo(value.demo)).catch(() => setError('app-check-unavailable'));
     const saved = sessionStorage.getItem('bridge-token');
     if (saved) enter(saved).catch(() => sessionStorage.removeItem('bridge-token'));
   }, [enter,request]);
@@ -150,7 +151,7 @@ export default function BridgeWork() {
       setQuery(''); setResults(undefined); openCase(created.id);
     });
   }
-  const securityErrors:Record<string,string>={'privacy-review':'機密情報の検出、または機密検査を完了できないため公開を保留しました。本文と検査設定を確認してください。画像の検査に未対応の環境では画像付きマニュアルを公開できません。','save-before-approve':'変更を未確認として保存してから、その版を確認・承認してください。','rate-limited':'利用回数の上限に達しました。少し時間をおいて再度操作してください。','app-check-required':'アプリの正当性を確認できません。App Checkの設定を確認してください。'};
+  const securityErrors:Record<string,string>={'app-check-unconfigured':'App Checkの設定が不足しています。管理者がFirebaseアプリID・サイトキー・許可アプリIDを確認してください。','app-check-unavailable':'アプリの正当性を確認できませんでした。通信環境を確認して再読み込みしてください。','privacy-review':'機密情報の検出、または機密検査を完了できないため公開を保留しました。本文と検査設定を確認してください。画像の検査に未対応の環境では画像付きマニュアルを公開できません。','save-before-approve':'変更を未確認として保存してから、その版を確認・承認してください。','rate-limited':'利用回数の上限に達しました。少し時間をおいて再度操作してください。','app-check-required':'アプリの正当性を確認できません。App Checkの設定を確認してください。'};
   const errorText = securityErrors[error] ?? (error === 'generation-running' ? '現在マニュアルを生成しています。完了後に操作できます。'
     : error === 'invalid-program' ? '未入力の項目、分岐先、到達不能なブロックや循環を確認してください。'
     : error === 'program-evidence' ? '操作や作業権限の根拠が不足しています。内容を編集し、未確認として保存してから確認してください。'

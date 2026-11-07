@@ -5,6 +5,8 @@ import {authenticate,isDemo} from '../../../lib/storage';
 import {actionSchema,ApiError,execute,workspace} from '../../../lib/workflow';
 import {audit,loginLimit,requestLimit,SecurityError,securityContext} from '../../../lib/security-runtime';
 import type {Profile} from '../../../lib/model';
+import {publicAppCheckConfig} from '../../../lib/app-check-config';
+import {verifyAppCheckProof,AppCheckDenied} from '../../../lib/app-check-verifier';
 export const runtime='nodejs';export const dynamic='force-dynamic';export const maxDuration=300;
 const reply=(body:unknown,status=200)=>NextResponse.json(body,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...(status===429?{'Retry-After':'60'}:{})}});
 async function readJson(request:NextRequest,max:number){
@@ -15,16 +17,16 @@ async function readJson(request:NextRequest,max:number){
  try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw new SecurityError(400,'invalid-input');}
 }
 async function appCheck(request:NextRequest){
- if(process.env.BRIDGE_APP_CHECK_ENFORCE!=='true')return;
- const token=request.headers.get('X-Firebase-AppCheck');if(!token||token.length>10000)throw new SecurityError(403,'app-check-required');
- const app=getApps()[0]??initializeApp({credential:applicationDefault(),projectId:process.env.FIREBASE_PROJECT_ID});
- try{const result=await getAppCheck(app).verifyToken(token);const allowed=(process.env.BRIDGE_APP_CHECK_APP_IDS??'').split(',').filter(Boolean);if(!allowed.length||!allowed.includes(result.appId))throw Error();}catch{throw new SecurityError(403,'app-check-invalid');}
+ try{await verifyAppCheckProof({required:process.env.BRIDGE_APP_CHECK_ENFORCE==='true',token:request.headers.get('X-Firebase-AppCheck'),
+  allowedAppIds:(process.env.BRIDGE_APP_CHECK_APP_IDS??'').split(',').map(value=>value.trim()).filter(Boolean),verify:async token=>{
+   const app=getApps()[0]??initializeApp({credential:applicationDefault(),projectId:process.env.FIREBASE_PROJECT_ID});return getAppCheck(app).verifyToken(token);
+  }});}catch(error){if(error instanceof AppCheckDenied)throw new SecurityError(403,error.code);throw error;}
 }
 async function run(request:NextRequest){
  let profile:Profile|null=null,operation='request',resourceId:string|undefined;
  try{
   if(isDemo()&&process.env.NODE_ENV==='production'&&process.env.BRIDGE_ALLOW_PUBLIC_DEMO!=='true')throw new SecurityError(503,'demo-disabled-in-production');
-  if(request.method==='GET'&&request.nextUrl.searchParams.has('config'))return reply({demo:isDemo()});
+  if(request.method==='GET'&&request.nextUrl.searchParams.has('config'))return reply({demo:isDemo(),appCheck:publicAppCheckConfig(process.env)});
   if(request.method==='POST'){
    const origin=request.headers.get('origin');const allowed=(process.env.BRIDGE_ALLOWED_ORIGINS??'').split(',').filter(Boolean);
    if(origin&&origin!==request.nextUrl.origin&&!allowed.includes(origin))throw new SecurityError(403,'origin-denied');
