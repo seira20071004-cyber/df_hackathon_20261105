@@ -7,7 +7,8 @@ import {ManualInbox,ManualSend} from './manual-delivery';
 import {DocumentLibrary} from './document-library';
 import {AdaptiveIntake} from './adaptive-intake';
 import type {AdaptiveDetails} from '../lib/adaptive';
-import {OrganizationEntry,type GoogleConfig} from './organization-entry';
+import {OrganizationEntry} from './organization-entry';
+import {GOOGLE_SESSION,googleAuthClient,googleSessionToken,signOutGoogle,type GoogleConfig} from './google-session';
 import {Settings,WorkspaceShell,type AppTab} from './workspace-shell';
 import {bridgeFetch} from './app-check';
 import type {ManualEvent} from './manual-guide';
@@ -65,9 +66,10 @@ export default function BridgeWork() {
   const t = (key: Parameters<typeof copy>[1]) => copy(language,key);
 
   const request = useCallback(async <T,>(auth: string, payload?: object, suffix = ''): Promise<T> => {
+    const credential=auth===GOOGLE_SESSION?await googleSessionToken():auth;
     const response = await bridgeFetch(suffix, {
       cache: 'no-store', method: payload ? 'POST' : 'GET',
-      headers: {Authorization: 'Bearer ' + auth, ...(payload ? {'Content-Type':'application/json'} : {})},
+      headers: {Authorization: 'Bearer ' + credential, ...(payload ? {'Content-Type':'application/json'} : {})},
       body: payload ? JSON.stringify(payload) : undefined
     });
     const result = await response.json();
@@ -79,18 +81,28 @@ export default function BridgeWork() {
     setData(next);
     return next;
   }, [request]);
-  const enter = useCallback(async (auth: string) => {
+  const enter = useCallback(async (auth: string,google=false) => {
     const next = await refresh(auth);
     const cached = localStorage.getItem('bridge-language-' + next.profile.id);
     setLanguage(languages.find(code => code === cached) ?? next.profile.preferredLanguage);
     setSite(next.profile.siteIds[0]);
-    sessionStorage.setItem('bridge-token',auth);
-    setToken(auth);
+    const session=google?GOOGLE_SESSION:auth;
+    sessionStorage.setItem('bridge-token',session);
+    setToken(session);
   }, [refresh]);
   useEffect(() => {
-    request<{demo:boolean;googleAuth?:GoogleConfig;photoIntake?:boolean}>('',undefined,'?config').then(value => {setDemo(value.demo);setGoogleAuth(value.googleAuth);setPhotoEnabled(Boolean(value.photoIntake));}).catch(() => setError('app-check-unavailable'));
-    const saved = sessionStorage.getItem('bridge-token');
-    if (saved) enter(saved).catch(() => sessionStorage.removeItem('bridge-token'));
+    let cancelled=false;
+    request<{demo:boolean;googleAuth?:GoogleConfig;photoIntake?:boolean}>('',undefined,'?config').then(async value=>{
+      if(cancelled)return;
+      setDemo(value.demo);setGoogleAuth(value.googleAuth);setPhotoEnabled(Boolean(value.photoIntake));
+      const saved=sessionStorage.getItem('bridge-token');
+      if(!saved)return;
+      try{
+        if(saved===GOOGLE_SESSION){if(!value.googleAuth)throw new Error('login-required');await googleAuthClient(value.googleAuth);}
+        if(!cancelled)await enter(saved);
+      }catch{if(!cancelled)sessionStorage.removeItem('bridge-token');}
+    }).catch(()=>{if(!cancelled)setError('app-check-unavailable');});
+    return ()=>{cancelled=true;};
   }, [enter,request]);
   useEffect(() => {document.documentElement.lang = language;}, [language]);
   useEffect(() => {setVoiceSupported(Boolean(speechRecognition()));}, []);
@@ -113,7 +125,7 @@ export default function BridgeWork() {
   function changeSite(next:string){setInvite(undefined);setSite(next);setSelected('');setManualId('');setResults(undefined);}
   function signOut(){
     setPhoto(undefined);setInvite(undefined);setManualFilter('');setChatTranslations({});setIntake([]);setConsultOpen(false);
-    if(googleAuth)void import('firebase/app').then(async sdk=>{const app=sdk.getApps().find(item=>item.name==='bridge-work-login');if(app){const auth=await import('firebase/auth');await auth.signOut(auth.getAuth(app));}}).catch(()=>undefined);
+    if(googleAuth)void signOutGoogle().catch(()=>undefined);
     sessionStorage.removeItem('bridge-token');setToken('');setData(undefined);setLanguage('ja');setQuery('');setResults(undefined);setSelected('');
     setManualId('');setMessage('');setReuseConfirmed(false);setError('');setTab('home');setStatusFilter('all');
   }
@@ -155,7 +167,8 @@ export default function BridgeWork() {
   const send=useCallback(<T,>(payload:object)=>request<T>(token,{siteId:site,...payload}),[request,token,site]);
   async function downloadSource(id:string,guide?:Manual,page?:number){
     const suffix='?sourcePdf='+id+'&site='+encodeURIComponent(site)+(guide?'&manual='+encodeURIComponent(guide.id)+'&version='+encodeURIComponent(guide.updatedAt):'')+(page?'&page='+page:'');
-    const response=await bridgeFetch(suffix,{headers:{Authorization:'Bearer '+token}});
+    const credential=token===GOOGLE_SESSION?await googleSessionToken():token;
+    const response=await bridgeFetch(suffix,{headers:{Authorization:'Bearer '+credential}});
     if(!response.ok)throw new Error('document-download-failed');
     const url=URL.createObjectURL(await response.blob());const anchor=document.createElement('a');anchor.href=url;anchor.download=page?'source-p'+page+'.pdf':'source.pdf';anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
@@ -193,6 +206,8 @@ export default function BridgeWork() {
     : error === 'invalid-figures' ? '図を保存できませんでした。JPEG・PNG・WebPの画像と挿入位置を確認してください。'
     : error === 'review-evidence' ? '原文との照合が完了していません。再生成するか、内容を修正して未確認として保存し、改めて確認してください。'
     : error === 'review-images' ? '編集内容を保存し、図解を再生成してから確認済にしてください。'
+    : error === 'google-domain-not-authorized' ? 'この公開URLはFirebaseの承認済みドメインに登録されていません。'
+    : error === 'google-popup-blocked' ? 'ブラウザーでログイン用のポップアップを許可してください。'
     : error === 'photo-too-large' ? '800 KB以下の写真を選んでください。'
     : error === 'invalid-invite' ? '招待コードが無効、期限切れ、または使用回数の上限に達しています。'
     : error === 'google-login-failed' ? 'Google ログインを完了できませんでした。再試行してください。'
@@ -215,7 +230,7 @@ export default function BridgeWork() {
       <button disabled={busy} onClick={() => run(() => enter('linh'))}>Linh Nguyễn · Nhân viên / スタッフ <span>→</span></button>
       <button className="secondary" disabled={busy} onClick={() => run(() => enter('sato'))}>佐藤 美咲 · 管理者 <span>→</span></button>
       <button className="secondary" disabled={busy} onClick={() => run(() => enter('alex'))}>Alex Smith · Staff <span>→</span></button><details><summary>引き継ぎデモ</summary><button className="secondary" disabled={busy} onClick={()=>run(()=>enter('tanaka'))}>田中 健太 · 管理者</button></details></details>}
-    {demo === false && <details className="alternate-login"><summary>既存のメールアカウント</summary><form className="flow" onSubmit={event => {
+    {demo === false && !googleAuth && <details className="alternate-login"><summary>既存のメールアカウント</summary><form className="flow" onSubmit={event => {
       event.preventDefault(); const form = new FormData(event.currentTarget);
       run(async () => {const result = await request<{token:string}>('',{email:form.get('email'),password:form.get('password')},'?login'); await enter(result.token);});
     }}><label>メールアドレス<input name="email" type="email" required autoComplete="username"/></label>

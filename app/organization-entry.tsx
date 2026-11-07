@@ -2,14 +2,14 @@
 import {useState} from 'react';
 import type {Language} from '../lib/model';
 
-export type GoogleConfig={projectId:string;apiKey:string;authDomain:string};
+import {googleSessionToken,signInGoogle,type GoogleConfig} from './google-session';
 type Props={
  config?:GoogleConfig;
  demo:boolean;
  language:Language;
  busy:boolean;
  run:(work:()=>Promise<void>)=>void;
- enter:(token:string)=>Promise<void>;
+ enter:(token:string,google?:boolean)=>Promise<void>;
  submit:(token:string,payload:object)=>Promise<void>;
 };
 
@@ -19,14 +19,8 @@ export function OrganizationEntry({config,demo,language,busy,run,enter,submit}:P
 
  async function connect(){
   if(!config)throw new Error('google-unconfigured');
-  const [{getApps,initializeApp},{getAuth,GoogleAuthProvider,signInWithPopup,setPersistence,inMemoryPersistence}]=await Promise.all([import('firebase/app'),import('firebase/auth')]);
-  const name='bridge-work-login';
-  const app=getApps().find(app=>app.name===name)??initializeApp(config,name);
-  const auth=getAuth(app);
-  await setPersistence(auth,inMemoryPersistence);
-  const credential=await signInWithPopup(auth,new GoogleAuthProvider()).catch(()=>{throw new Error('google-login-failed');});
-  const idToken=await credential.user.getIdToken();
-  try{await enter(idToken);}
+  const idToken=await signInGoogle(config);
+  try{await enter(idToken,true);}
   catch(error){
    if(!(error instanceof Error)||error.message!=='login-required')throw error;
    setToken(idToken);
@@ -58,7 +52,11 @@ export function OrganizationEntry({config,demo,language,busy,run,enter,submit}:P
   :<form className="flow" onSubmit={event=>{
    event.preventDefault();
    const value=String(new FormData(event.currentTarget).get('value')??'').trim();
-   run(async()=>{await submit(token,mode==='create'?{action:'create',name:value,language}:{action:'join',code:value,language});await enter(token);});
+   run(async()=>{
+    const credential=await googleSessionToken();
+    await submit(credential,mode==='create'?{action:'create',name:value,language}:{action:'join',code:value,language});
+    await enter(credential,true);
+   });
   }}><label>{mode==='create'?'組織名':'招待コード'}<input name="value" required minLength={mode==='create'?2:24} maxLength={mode==='create'?100:24} autoComplete="off" autoCapitalize={mode==='join'?'characters':'none'}/></label>
   <button disabled={busy}>{mode==='create'?'作成する':'参加する'}</button></form>}
  </div>;
