@@ -1,3 +1,4 @@
+import {guidance,type ConsultationType} from './adaptive.ts';
 import {createHash} from 'node:crypto';
 import type {z} from 'zod';
 import type {Profile,Question} from './model';
@@ -54,6 +55,7 @@ export function generationContext(profile:Profile,question:Question,answers:Addi
   if(question.status!=='resolved')throw new Error('source-not-resolved');
   const text=(value:string)=>options.raw?value:redact(value,profile.name);
   const sources=[{id:'question:'+question.id,role:'employee',text:text(question.originalText),japaneseReference:text(question.japaneseText)},
+    ...(question.intakeAnswers??[]).map((answer,index)=>({id:'intake:'+index,role:'employee',text:text(answer.text),japaneseReference:''})),
     ...question.messages.map(message=>({id:message.id,role:message.role,text:text(message.originalText),japaneseReference:text(message.translatedText)})),
     {id:'resolved:'+question.id,role:'system',text:'スタッフが解決ボタンを押しました。成功した操作の特定を意味しません。',japaneseReference:''},
     ...answers.map(answer=>({id:answer.id,role:'manager_supplement',text:text(answer.answer),japaneseReference:''}))];
@@ -88,8 +90,8 @@ export function programEvidenceIssues(program:ManualProgram,extracted:ExtractedC
   }return issues;
 }
 export interface GenerationResult {state:'ready'|'awaiting_answers'|'held';extraction:ExtractedChat;questions:GapQuestion[];program?:ManualProgram;report?:QualityReport;issues:string[];repairs:number;}
-export async function runInteractiveGeneration({context,call,round,previousQuestions=[],answers=[],onStage=async()=>undefined}: {
-  context:Context;call:AiCall;round:number;previousQuestions?:GapQuestion[];answers?:AdditionalAnswer[];onStage?:(stage:Stage)=>Promise<void>;
+export async function runInteractiveGeneration({context,call,round,previousQuestions=[],answers=[],consultationType='unknown',onStage=async()=>undefined}: {
+  context:Context;call:AiCall;round:number;consultationType?:ConsultationType;previousQuestions?:GapQuestion[];answers?:AdditionalAnswer[];onStage?:(stage:Stage)=>Promise<void>;
 }):Promise<GenerationResult>{
   const deadline=Date.now()+240_000;
   async function ask<T>(schema:z.ZodType<T>,instruction:string,data:unknown,model?:string){const remaining=deadline-Date.now();if(remaining<1000)throw new Error('generation-timeout');
@@ -110,7 +112,7 @@ export async function runInteractiveGeneration({context,call,round,previousQuest
   if(!extracted.facts.some(fact=>fact.status==='current'&&['action','scope','warning'].includes(fact.kind)))return {state:'held',extraction:extracted,questions:[],issues:['対処法の確定情報がありません'],repairs:0};
   let candidate:ManualProgram|undefined,report:QualityReport|undefined,issues:string[]=[];
   for(let repair=0;repair<=MAX_REPAIRS;repair++){
-    await onStage('writing');candidate=await ask(programSchema,interactivePrompts.design,{context,extraction:extracted,...(candidate?{previousCandidate:candidate,errors:issues,...(report?{quality:report}:{})}:{})});
+    await onStage('writing');candidate=await ask(programSchema,interactivePrompts.design+'\n分類に応じた構成指針（根拠がなければ追加しない）：'+guidance[consultationType]+' STEPのpresentationはinstruction・checklist・explanation・approvalから必要に応じて選ぶ。approvalは承認が必要という説明であり、承認操作ではない。',{context,extraction:extracted,...(candidate?{previousCandidate:candidate,errors:issues,...(report?{quality:report}:{})}:{})});
     issues=[...graphIssues(candidate),...programEvidenceIssues(candidate,extracted,context),...(candidate.language!=='ja'?['原文マニュアルは日本語で作成してください']:[])];
     if(!issues.length){await onStage('validating');report=await ask(qualitySchema,interactivePrompts.verify,{context,extraction:extracted,candidate,errors:issues},process.env.GEMINI_REVIEW_MODEL);issues=qualityIssues(candidate,report);}
     if(!issues.length)return {state:'ready',extraction:extracted,program:candidate,report,questions:[],issues:[],repairs:repair};

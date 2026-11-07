@@ -8,7 +8,7 @@ type Context=ReturnType<typeof generationContext>['context'];
 export type ProtectedSource={context?:Context;inspection?:Inspection;error?:string;approvedBy?:string;approvedAt?:string};
 export async function prepareProtectedSource(profile:Profile,question:Question,answers:AdditionalAnswer[],prior?:ProtectedSource):Promise<ProtectedSource>{
  try{
-  const raw=[question.originalText,question.resolution,...question.messages.map(row=>row.originalText),...answers.map(row=>row.answer)];
+  const raw=[question.originalText,question.resolution,...(question.intakeAnswers??[]).map(row=>row.text),...question.messages.map(row=>row.originalText),...answers.map(row=>row.answer)];
   if(raw.some(line=>localInspect(line).findings.some(item=>item.risk==='high')))return {error:'sensitive-input-blocked'};
   const {context}=generationContext(profile,{...question,japaneseText:'',messages:question.messages.map(row=>({...row,translatedText:''}))},answers,{raw:true});
   if(prior?.context){

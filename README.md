@@ -1,5 +1,6 @@
 # Bridge Work 2.0
 
+[適応型相談・モバイル画面の試演と設定](docs/adaptive-consultation.md)。
 [2.0の試演手順・実装状況・Firebase接続設定](docs/mvp-2.0.md)。外部AIを呼ばないローカル試演は `npm run demo` で起動します。解決済みの会話は管理者が保護済みコピーを確認してからマニュアル化します。
 
 App Checkのブラウザ連携、設定方法、依存関係更新、今回の検証範囲は [接続・追加報告](docs/app-check-setup.md) を参照してください。ローカル開発画面は `npm run dev -- --hostname 127.0.0.1 --port 3003` で起動できます。外部共有リンクとは別です。

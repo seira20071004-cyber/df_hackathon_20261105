@@ -24,8 +24,13 @@ export function ManualGuide({manual,program,language,onEvent,onBlock,contextText
   async function finish(event:'resolved'|'unresolved'){setBusy(true);setError('');try{await onEvent?.(event,run,trail,question,language);setDone(true);}catch{setError(text.error);}finally{setBusy(false);}}
   function reset(){setRun(crypto.randomUUID());setTrail([]);setContact(false);setDone(false);setError('');}
   const ordinal=current?.type==='step'?program.blocks.filter(block=>block.type==='step').findIndex(block=>block.id===current.id):-1;
+  const format=manual.consultationType??'unknown';
+  const formats={ja:{troubleshooting:'トラブル解決',procedure:'業務手続き',work_instruction:'作業ガイド',information_support:'情報・翻訳',unknown:'マニュアル'},en:{troubleshooting:'Troubleshooting',procedure:'Procedure',work_instruction:'Work guide',information_support:'Information & translation',unknown:'Guide'},vi:{troubleshooting:'Khắc phục sự cố',procedure:'Thủ tục',work_instruction:'Hướng dẫn công việc',information_support:'Thông tin và dịch thuật',unknown:'Hướng dẫn'}}[language];
+  const [checked,setChecked]=useState<Record<string,boolean>>({});
+  const style=current?.type==='step'?(current.presentation??(format==='work_instruction'?'checklist':format==='information_support'?'explanation':'instruction')):'instruction';
   const stepPictures=ordinal>=0?(manual.figures??[]).filter(figure=>figure.afterStep===ordinal):[];
   return <section className="interactive-guide" aria-label="対話型マニュアル">
+    <span className="guide-format">{formats[format]}</span>
     {program.description&&<p className="guide-description">{program.description}</p>}
     <button className="secondary" type="button" aria-expanded={overview} onClick={()=>setOverview(!overview)}>{{ja:'全体を見る',en:'View overview',vi:'Xem tổng quan'}[language]}</button>
     {overview&&<ol className="guide-overview">{program.blocks.map(block=><li key={block.id} className={trail.includes(block.id)?'on-path':''}>{block.type==='step'?block.title:block.type==='branch'?block.question:block.content}</li>)}</ol>}
@@ -39,11 +44,13 @@ export function ManualGuide({manual,program,language,onEvent,onBlock,contextText
       !current?<div className="flow guide-start">{(manual.figures??[]).filter(figure=>figure.afterStep===-1).map(figure=><figure key={figure.id}><img src={figure.url} alt={figure.caption}/>{figure.caption&&<figcaption>{figure.caption}</figcaption>}</figure>)}
         <button disabled={busy} onClick={start}>{text.start} →</button></div>:
       <div className={'guide-block flow guide-'+current.type} aria-live="polite">
-        <div className="guide-progress"><span>{current.type.toUpperCase()}</span><small>{trail.length}</small></div>
+        <div className="guide-progress"><span>{formats[format]}</span><small>{trail.length} / {program.blocks.length}</small></div><progress className="guide-meter" value={trail.length} max={program.blocks.length} aria-label={formats[format]}/>
         {current.type==='step'?<><h3>{current.title}</h3><p className="guide-action">{current.content}</p>{current.supplement&&<p className="notice">{current.supplement}</p>}
           {manual.imageLayout==='steps'&&manual.imageUrls[ordinal]&&<img className="guide-image" src={manual.imageUrls[ordinal]} alt={current.title}/>}
           {stepPictures.map(figure=><figure key={figure.id}><img className="guide-image" src={figure.url} alt={figure.caption}/>{figure.caption&&<figcaption>{figure.caption}</figcaption>}</figure>)}
-          <button disabled={busy} onClick={()=>next(current.nextBlockId)}>{text.next} →</button></>:
+          {style==='checklist'&&<label className="check"><input type="checkbox" checked={Boolean(checked[current.id])} onChange={event=>setChecked({...checked,[current.id]:event.target.checked})}/>{{ja:'この項目を確認した',en:'I checked this item',vi:'Tôi đã kiểm tra mục này'}[language]}</label>}
+          {style==='approval'&&<p className="notice">{{ja:'必要な承認は職場の担当者に確認してください。',en:'Check any required approval with the designated person.',vi:'Hãy xác nhận phê duyệt cần thiết với người phụ trách.'}[language]}</p>}
+          <button disabled={busy||(style==='checklist'&&!checked[current.id])} onClick={()=>next(current.nextBlockId)}>{text.next} →</button></>:
         current.type==='branch'?<><h3>{current.question}</h3><p className="muted">{text.question}</p><div className="branch-choices">{current.choices.map(choice=><button className="secondary" key={choice.id} disabled={busy} onClick={()=>next(choice.nextBlockId)}>{choice.label} →</button>)}</div></>:
         current.type==='warning'?<><h3><span aria-hidden="true">!</span> {current.severity==='stop'?'STOP':'WARNING'}</h3><p className="guide-action">{current.content}</p>
           <button disabled={busy} onClick={()=>next(current.nextBlockId)}>{current.nextBlockId?text.next:text.contact}</button></>:

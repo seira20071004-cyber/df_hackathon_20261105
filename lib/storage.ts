@@ -53,6 +53,12 @@ async function readDemo(): Promise<DemoState> {
     return {...seedDemo(), manualViews: [],manualDeliveries:[],manualUses:[]};
   }
 }
+export async function siteSafety(profile:Profile,siteId:string){
+ if(!profile.siteIds.includes(siteId)||isDemo())return undefined;
+ const value=(await getFirestore(bridgeAdmin()).collection('organizations').doc(profile.organizationId).collection('sites').doc(siteId).get()).data()?.safety;
+ const result=z.object({keywords:z.array(z.string().min(1).max(80)).max(30),contact:z.string().max(300),instructions:z.string().max(1000)}).safeParse(value);
+ return result.success?result.data:undefined;
+}
 export async function siteManagers(profile:Profile):Promise<StaffRecipient[]> {
  if(profile.role!=='manager')return [];
  const profiles:Profile[]=isDemo()?Object.values(demoProfiles):(await getFirestore(bridgeAdmin()).collection('users').where('organizationId','==',profile.organizationId).where('role','==','manager').get()).docs.flatMap(doc=>{const result=profileSchema.safeParse(doc.data());return result.success?[{...result.data,id:doc.id}]:[];});

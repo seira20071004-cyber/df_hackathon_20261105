@@ -68,7 +68,8 @@ export function WorkspaceShell({profile,language,tab,unread,demo,onNavigate,onSi
           <Icon name={item as 'home'|'cases'|'manuals'}/>{name(item)}{item==='manuals'&&unread>0&&<span className="notification-count">{unread}</span>}
         </button>)}</nav><div className="drawer-bottom"><button type="button" className={'drawer-link '+(tab==='settings'?'current':'')} onClick={()=>navigate('settings')}><Icon name="settings"/>{text.settings}</button></div>
       </aside></>}
-    <main className={'content flow workspace-content '+(profile.role==='employee'?'staff-workspace':'')}>{children}</main>
+    <main className={'content flow workspace-content '+(profile.role==='employee'?'staff-workspace':'manager-workspace')}>{children}</main>
+    {profile.role==='manager'&&<nav className="staff-bottom manager-bottom" aria-label={text.menu}>{(['cases','manuals','settings'] as const).map(item=><button key={item} type="button" aria-current={tab===item?'page':undefined} onClick={()=>navigate(item)}><Icon name={item}/>{item==='settings'?({ja:'メンバー',en:'Members',vi:'Thành viên'}[language]):name(item)}</button>)}</nav>}
     {profile.role==='employee'&&<nav className="staff-bottom" aria-label={text.menu}>{(['home','cases','manuals'] as const).map(item=><button key={item} type="button" aria-current={tab===item?'page':undefined} onClick={()=>navigate(item)}><Icon name={item}/>{name(item)}</button>)}</nav>}
   </div>;
 }

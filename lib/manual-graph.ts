@@ -3,10 +3,11 @@ import {z} from 'zod';
 const text=z.string().trim().min(1).max(500),id=z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,79}$/);
 const sourceIds=z.array(z.string().min(1).max(180)).max(8);
 const next=id.nullable();
+export const stepPresentations=['instruction','checklist','explanation','approval'] as const;
 const base={id,sourceMessageIds:sourceIds};
 export const CONTACT_TEXT='この操作は案内できません。作業を中止して管理者に確認してください。';
 export const blockSchema=z.discriminatedUnion('type',[
-  z.object({...base,type:z.literal('step'),title:text,content:text,supplement:z.string().max(500),nextBlockId:next,
+  z.object({...base,type:z.literal('step'),presentation:z.enum(stepPresentations).optional(),title:text,content:text,supplement:z.string().max(500),nextBlockId:next,
     restricted:z.boolean(),authorizationSourceMessageIds:sourceIds}),
   z.object({...base,type:z.literal('branch'),question:text,choices:z.array(z.object({id,label:text,nextBlockId:next})).min(2).max(4)}),
   z.object({...base,type:z.literal('warning'),content:text,severity:z.enum(['notice','stop']),nextBlockId:next}),
@@ -83,4 +84,4 @@ export function paperProgram(program:ManualProgram){
   return {...programContent(program),steps,cautions:[]};
 }
 export function graphShape(program:ManualProgram){return JSON.stringify({start:program.startBlockId,blocks:program.blocks.map(block=>({id:block.id,type:block.type,next:nextIds(block),sources:block.sourceMessageIds,
-  ...(block.type==='step'?{restricted:block.restricted,authorization:block.authorizationSourceMessageIds}:{}),...(block.type==='warning'?{severity:block.severity}:{}),...(block.type==='branch'?{choices:block.choices.map(choice=>choice.id)}:{})}))});}
+  ...(block.type==='step'?{restricted:block.restricted,authorization:block.authorizationSourceMessageIds,presentation:block.presentation}:{}),...(block.type==='warning'?{severity:block.severity}:{}),...(block.type==='branch'?{choices:block.choices.map(choice=>choice.id)}:{})}))});}

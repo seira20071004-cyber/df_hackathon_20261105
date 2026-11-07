@@ -28,6 +28,8 @@ export interface Question {
   id: string;
   organizationId: string;
   siteId: string;
+  consultation?:import('./adaptive').Analysis;
+  intakeAnswers?:{field:string;text:string}[];
   assigneeId?:string;
   assigneeName?:string;
   assignments?:{by:string;to:string;at:string}[];
@@ -72,17 +74,21 @@ export interface Manual {
   updatedAt: string;
   revision?:number;
   approvedAt?:string|null;
-  reviewState?:'awaiting_answers'|'pending_approval'|'held'|'rejected';
+  reviewState?:'awaiting_answers'|'pending_approval'|'held'|'rejected'|'archived';
+  knowledgeSuggestion?:{decision:'new_manual'|'update_existing'|'duplicate'|'skip';manualId:string|null};
+  feedback?:{by:string;version:string;reason:'outdated'|'incorrect'|'unhelpful';at:string}[];
   publishedSnapshot?:Manual;
   publicationSuppressed?:boolean;
   security?:{contentHash:string;inspection:import('./security-content').Inspection;checkedAt:string};
+  consultationType?:import('./adaptive').ConsultationType;
+  riskLevel?:import('./adaptive').Risk;
   protectedSource?:import('./protected-source').ProtectedSource;
   program?:ManualProgram;
   programTranslations?:Partial<Record<Language,ManualProgram>>;
   extraction?:ExtractedChat;
   clarification?:{round:number;questions:GapQuestion[];previousQuestions:GapQuestion[];answers:AdditionalAnswer[]};
   quality?:{report?:QualityReport;issues:string[];repairs:number};
-  audit?:{revision:number;at:string;actor:string;action:'generated'|'edited'|'published'|'unpublished'|'held'|'rejected'|'access_changed';changes:string[]}[];
+  audit?:{revision:number;at:string;actor:string;action:'generated'|'edited'|'published'|'unpublished'|'held'|'rejected'|'access_changed'|'archived';changes:string[]}[];
   embedding?:{model:string;hash:string;values:number[]};
   generation?: {
     state: 'queued' | 'analyzing' | 'checking_gaps' | 'writing' | 'validating' | 'illustrating' | 'awaiting_answers' | 'held' | 'ready' | 'failed';

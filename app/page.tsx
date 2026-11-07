@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import { copy } from '../lib/copy';
 import { ManualReview, ManualView, isGenerating } from './manual';
 import {ManualInbox,ManualSend} from './manual-delivery';
+import {AdaptiveIntake} from './adaptive-intake';
+import type {AdaptiveDetails} from '../lib/adaptive';
 import {OrganizationEntry,type GoogleConfig} from './organization-entry';
 import {Settings,WorkspaceShell,type AppTab} from './workspace-shell';
 import {bridgeFetch} from './app-check';
@@ -25,7 +27,7 @@ function speechRecognition() {
 }
 
 function Brand() {
-  return <div className="brand"><span className="brand-icon" aria-hidden="true">↔</span><div>Bridge<span>Work</span><small>WORKPLACE SUPPORT</small></div></div>;
+  return <div className="brand"><span className="brand-icon" aria-hidden="true"><svg viewBox="0 0 32 32" width="34" height="34" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 6h15a2 2 0 0 1 2 2v10H11l-6 5V8a2 2 0 0 1 2-2Z"/><path d="M23 12h4a2 2 0 0 1 2 2v13l-5-4h-8a2 2 0 0 1-2-2"/></svg></span><div>Bridge<span>Work</span><small>WORKPLACE SUPPORT</small></div></div>;
 }
 function Badge({children, variant = ''}: {children: ReactNode; variant?: string}) {
   return <span className={'badge ' + variant}>{children}</span>;
@@ -45,7 +47,11 @@ export default function BridgeWork() {
   const [manualId,setManualId] = useState('');
   const [manualStatus,setManualStatus] = useState<Manual['status']>('draft');
   const [query,setQuery] = useState('');
-  const [results,setResults] = useState<{matches: Match[]; ai: boolean}>();
+  const [results,setResults] = useState<{matches: Match[]; ai: boolean;adaptive?:AdaptiveDetails}>();
+  const [consultOpen,setConsultOpen]=useState(false);
+  const [intake,setIntake]=useState<{field:string;text:string}[]>([]);
+  const [reported,setReported]=useState('');
+  const [searching,setSearching]=useState(false);
   const [message,setMessage] = useState('');
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState('');
@@ -96,20 +102,20 @@ export default function BridgeWork() {
     try {await work();} catch (caught) {setError(caught instanceof Error ? caught.message : 'server-error');}
     finally {setBusy(false);}
   }
-  function changeTab(next: AppTab) {setTab(next); setError('');}
+  function changeTab(next: AppTab) {setTab(next);setError('');if(next==='home'){setConsultOpen(false);setResults(undefined);setIntake([]);setManualId('');}if(next==='cases')setSelected('');}
   function changeLanguage(next:Language) {
     if(!data)return;setLanguage(next);setResults(undefined);localStorage.setItem('bridge-language-'+data.profile.id,next);
     request(token,{action:'language',language:next}).catch(()=>setError('server-error'));
   }
   function changeSite(next:string){setSite(next);setSelected('');setManualId('');setResults(undefined);}
   function signOut(){
-    setInvite(undefined);setManualFilter('');setChatTranslations({});
+    setInvite(undefined);setManualFilter('');setChatTranslations({});setIntake([]);setConsultOpen(false);
     if(googleAuth)void import('firebase/app').then(async sdk=>{const app=sdk.getApps().find(item=>item.name==='bridge-work-login');if(app){const auth=await import('firebase/auth');await auth.signOut(auth.getAuth(app));}}).catch(()=>undefined);
     sessionStorage.removeItem('bridge-token');setToken('');setData(undefined);setLanguage('ja');setQuery('');setResults(undefined);setSelected('');
     setManualId('');setMessage('');setReuseConfirmed(false);setError('');setTab('home');setStatusFilter('all');
   }
   function openCase(id: string) {
-    setSelected(id); setMessage(''); setReuseConfirmed(false); changeTab('cases');
+    changeTab('cases');setSelected(id); setMessage(''); setReuseConfirmed(false);
   }
   function openManual(id: string) {
     setManualId(id);
@@ -150,12 +156,14 @@ export default function BridgeWork() {
     const result=await send<{question?:Question}>({action:'manualSession',id:target.id,version:target.updatedAt,event,runId,path,text,language:eventLanguage??language});
     await refresh(token);if(result.question)openCase(result.question.id);return result;
   };
+  function searchConsultation(answers=intake){setManualId('');setSearching(true);setResults(undefined);run(async()=>{try{setResults(await send({action:'adaptiveSearch',text:query,language,answers}));}finally{setSearching(false);}});}
+  function reportGuide(guide:Manual){return <details className="panel flow"><summary>{{ja:'内容の問題を報告',en:'Report a problem',vi:'Báo cáo vấn đề'}[language]}</summary><div className="actions">{(['outdated','incorrect','unhelpful'] as const).map(reason=><button className="secondary" key={reason} type="button" disabled={busy} onClick={()=>run(async()=>{await send({action:'reportManual',id:guide.id,version:guide.updatedAt,reason});setReported(guide.id);})}>{{ja:{outdated:'情報が古い',incorrect:'内容が違う',unhelpful:'役に立たなかった'},en:{outdated:'Outdated',incorrect:'Incorrect',unhelpful:'Not helpful'},vi:{outdated:'Đã cũ',incorrect:'Không đúng',unhelpful:'Không hữu ích'}}[language][reason]}</button>)}</div>{reported===guide.id&&<p role="status">{{ja:'管理者に報告しました',en:'Report sent',vi:'Đã gửi báo cáo'}[language]}</p>}</details>;}
   function ask(match?: Match) {
     run(async () => {
       const created = await send<Question>({action:match ? 'selfResolve' : 'ask', id:crypto.randomUUID(), text:query, language,
-        ...(match ? {matchId:match.id,kind:match.kind} : {})});
+        ...(match ? {matchId:match.id,kind:match.kind} : {intake})});
       await refresh(token);
-      setQuery(''); setResults(undefined); openCase(created.id);
+      setQuery(''); setResults(undefined);setIntake([]);setConsultOpen(false);openCase(created.id);
     });
   }
   const securityErrors:Record<string,string>={'app-check-unconfigured':'App Checkの設定が不足しています。管理者がFirebaseアプリID・サイトキー・許可アプリIDを確認してください。','app-check-unavailable':'アプリの正当性を確認できませんでした。通信環境を確認して再読み込みしてください。','privacy-review':'機密情報の検出、または機密検査を完了できないため公開を保留しました。本文と検査設定を確認してください。画像の検査に未対応の環境では画像付きマニュアルを公開できません。','save-before-approve':'変更を未確認として保存してから、その版を確認・承認してください。','rate-limited':'利用回数の上限に達しました。少し時間をおいて再度操作してください。','app-check-required':'アプリの正当性を確認できません。App Checkの設定を確認してください。'};
@@ -212,19 +220,22 @@ export default function BridgeWork() {
         {error && <p className="alert" role="alert">{errorText}</p>}
         {busy && <p className="busy" role="status">{t('searching')}</p>}
         {tab === 'home' && !manager && <>
-          {!results&&<section className="panel flow staff-hero"><p className="eyebrow">{data.profile.companyName||siteName(site)}</p><h2>{t('hero')}</h2><button onClick={()=>{const field=document.getElementById('new-consultation');field?.scrollIntoView({block:'center'});field?.focus();}}>{{ja:'新しく相談する',en:'Start a consultation',vi:'Bắt đầu hỏi đáp'}[language]}</button></section>}
-          <ManualInbox deliveries={deliveries} manuals={manuals} language={language} busy={busy} onOpen={readManual}/>
-          {results && results.matches.length > 0 && <section className="panel flow" aria-labelledby="related-knowledge">
-            <h2 id="related-knowledge" tabIndex={-1} ref={focusSearchResults}>{t('similar')}</h2>
-            <p className="notice">{t('confirmSite')}</p>{!results.ai && <p className="muted">{t('fallback')}</p>}
-            {results.matches.map(match => <article className="result flow" key={match.kind + match.id}>
-              <div className="eyebrow">{siteName(match.siteId)} · {t(match.kind === 'manual' ? 'manuals' : 'cases')}</div>
-              <h3>{match.title}</h3>
+          {!consultOpen&&<section className="panel flow staff-hero"><p className="eyebrow">{data.profile.companyName||siteName(site)}</p><h2>{t('hero')}</h2><button onClick={()=>{setConsultOpen(true);setResults(undefined);setIntake([]);setManualId('');}}>{{ja:'新しく相談する',en:'Start a consultation',vi:'Bắt đầu hỏi đáp'}[language]}</button></section>}
+          {!consultOpen&&<ManualInbox deliveries={deliveries} manuals={manuals} language={language} busy={busy} onOpen={readManual}/>}
+          {consultOpen&&<div className="screen-title"><button type="button" className="screen-back" aria-label={{ja:'戻る',en:'Back',vi:'Quay lại'}[language]} onClick={()=>{if(manual){setManualId('');}else if(results){setResults(undefined);setManualId('');}else{setConsultOpen(false);setIntake([]);}}}>‹</button><h2>{manual?t('manuals'):({ja:'新しく相談する',en:'New consultation',vi:'Trao đổi mới'}[language])}</h2></div>}
+          {consultOpen&&searching&&<section className="panel flow search-progress" role="status"><div className="wave" aria-hidden="true">▂▅▃▇▅▂▃</div><strong>{t('searching')}</strong><p>{query}</p></section>}
+          {consultOpen&&results?.adaptive&&<AdaptiveIntake key={intake.length} details={results.adaptive} language={language} busy={busy} onAnswer={(field,text)=>{const answers=[...intake,{field,text}];setIntake(answers);searchConsultation(answers);}}/>}
+          {results && results.matches.length > 0 && <section className={'panel flow '+(manual?'opened-guide':'')} aria-label={t('similar')}>
+            {!manual&&<><h2 id="related-knowledge" tabIndex={-1} ref={focusSearchResults}>{{ja:'該当するマニュアルが見つかりました',en:'We found a matching guide',vi:'Đã tìm thấy hướng dẫn phù hợp'}[language]}</h2>
+            <p className="notice">{t('confirmSite')}</p>{!results.ai && <p className="muted">{t('fallback')}</p>}</>}
+            {results.matches.filter(match=>!manual||match.id===manual.id).map(match => <article className="result flow" key={match.kind + match.id}>
+              {!manual&&<><div className="eyebrow">{siteName(match.siteId)} · {t(match.kind === 'manual' ? 'manuals' : 'cases')}</div><h3>{match.title}</h3></>}
               {manual?.id === match.id ? <>
-                <ManualView manual={manual} language={language} onEvent={manualEvent(manual)} contextText={query}/>
+                <ManualView manual={manual} language={language} onEvent={manualEvent(manual)} contextText={[query,...intake.map(row=>row.text)].join('\n')}/>
+                {reportGuide(manual)}
                 {!manual.program&&<button className="secondary" disabled={busy} onClick={() => ask(match)}>{t('selfResolve')}</button>}
               </> : <><p>{t('manualFits')}</p><div className="actions">
-                <button className="secondary" disabled={busy} onClick={() => run(async () => {
+                <button className="guide-open" disabled={busy} onClick={() => run(async () => {
                   await send({action:'viewManual',id:match.id,version:match.version});
                   await refresh(token);
                   setManualId(match.id);
@@ -234,20 +245,17 @@ export default function BridgeWork() {
               </div></>}
             </article>)}
           </section>}
-          <form className="panel flow ask" onSubmit={event => {
-            event.preventDefault(); setManualId(''); setResults(undefined);
-            run(async () => setResults(await send({action:'search',text:query,language})));
-          }}>
+          {consultOpen&&!results&&!searching&&<form className="panel flow ask" onSubmit={event => {event.preventDefault();searchConsultation();}}>
             <div className="section-head"><span className="tile">?</span><div><div className="eyebrow">{t('help')}</div><h2>{t('hero')}</h2></div></div>
             <textarea id="new-consultation" aria-label={t('help')} placeholder={t('placeholder')} rows={3} maxLength={3000} required value={query} disabled={busy}
-              onChange={event => {setQuery(event.target.value);setResults(undefined);setManualId('');}}/>
-            {results?.matches.length === 0 && <p role="status">{t('noMatch')}</p>}
+              onChange={event => {setQuery(event.target.value);setResults(undefined);setManualId('');setIntake([]);}}/>
             <div className="actions"><button disabled={busy || listening || !query.trim()}>⌕ &nbsp; {t('search')}</button>
               {voiceSupported && <button className="secondary" type="button" disabled={busy || listening} onClick={()=>dictate()}>{t(listening ? 'listening' : 'voice')}</button>}
               <button className="secondary" type="button" disabled={busy||listening||!query.trim()} onClick={() => ask()}>{t('send')} →</button></div>
-          </form>
-          {!results&&questions.length>0&&<section className="panel flow"><div className="split"><h2>{t('recent')}</h2><button className="link" onClick={()=>changeTab('cases')}>{t('all')} →</button></div>{caseList(questions.slice(0,2))}</section>}
-          {!results&&manuals.length>0&&<section className="panel flow"><h2>{{ja:'もう一度見る',en:'Open a guide again',vi:'Xem lại hướng dẫn'}[language]}</h2>{manuals.slice(0,2).map(item=><button className="secondary" key={item.id} onClick={()=>readManual(item)}>{(item.translations[language]??item.content).title}</button>)}</section>}
+          </form>}
+          {consultOpen&&(results||searching)&&<button className="secondary direct-contact" type="button" disabled={busy||!query.trim()} onClick={()=>ask()}>{t('send')} →</button>}
+          {!consultOpen&&questions.length>0&&<section className="panel flow"><div className="split"><h2>{t('recent')}</h2><button className="link" onClick={()=>changeTab('cases')}>{t('all')} →</button></div>{caseList(questions.slice(0,2))}</section>}
+          {!consultOpen&&manuals.length>0&&<section className="panel flow"><h2>{{ja:'もう一度見る',en:'Open a guide again',vi:'Xem lại hướng dẫn'}[language]}</h2>{manuals.slice(0,2).map(item=><button className="secondary" key={item.id} onClick={()=>readManual(item)}>{(item.translations[language]??item.content).title}</button>)}</section>}
         </>}
         {tab === 'home' && manager && <>
           <div className="stats">{(['new','active','resolved'] as const).map(status => <button className="panel stat" key={status} onClick={() => {setStatusFilter(status); changeTab('cases');}}>
@@ -260,18 +268,23 @@ export default function BridgeWork() {
           </section>
         </>}
         {tab === 'cases' && <>
-          <section className="panel flow"><div className="split"><h2>{t('cases')}</h2><div className="actions">
+          <section className={'panel flow '+(question?'case-list-with-detail':'')}><div className="split"><h2>{t('cases')}</h2><div className="actions">
             {manager && <select aria-label="対応状況" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
               <option value="all">すべて</option>{(['new','active','resolved'] as const).map(status => <option key={status} value={status}>{t(status)}</option>)}
             </select>}<button className="secondary" disabled={busy} onClick={() => run(async () => {await refresh(token);})}>{t('refresh')}</button>
           </div></div>{caseList(questions.filter(row => statusFilter === 'all' || row.status === statusFilter))}</section>
-          {question && <section className="panel flow">
+          {question && <section className="panel flow chat-screen">
+            <div className="screen-title chat-back"><button className="screen-back" type="button" onClick={()=>setSelected('')} aria-label={{ja:'戻る',en:'Back',vi:'Quay lại'}[language]}>‹</button><strong>{t('cases')}</strong></div>
             <div className="split"><div className="eyebrow">{siteName(question.siteId)} · {manager ? question.category : languageNames[question.originalLanguage]}</div><Badge variant={question.status}>{t(question.status)}</Badge></div>
             {question.assigneeName&&<p className="muted">{{ja:'担当管理者',en:'Assigned manager',vi:'Quản lý phụ trách'}[language]}: {question.assigneeName}</p>}
             {manager&&question.status!=='resolved'&&(!question.assigneeId?<button className="secondary" disabled={busy} onClick={()=>run(async()=>{await send({action:'assign',id:question.id});await refresh(token);})}>対応する</button>:question.assigneeId===data.profile.id&&<details><summary>担当者を変更</summary><select aria-label="引き継ぎ先" value="" disabled={busy} onChange={event=>{const managerId=event.target.value;if(managerId)run(async()=>{await send({action:'assign',id:question.id,managerId});await refresh(token);});}}><option value="">引き継ぎ先を選択</option>{data.managers?.filter(person=>person.id!==data.profile.id&&person.siteIds.includes(site)).map(person=><option key={person.id} value={person.id}>{person.name}</option>)}</select></details>)}
             <h2>{manager ? question.japaneseText || question.originalText : question.originalText}</h2>
             {manager && <div className="notice"><small>{question.japaneseText ? t('original') : t('unavailable')} · {languageNames[question.originalLanguage]}</small><p>{question.originalText}</p>{question.summary && <p>AI 要約 · {question.summary}</p>}</div>}
             {question.references.map(reference => <div className="notice" key={reference.kind + reference.id}>{reference.title} · {reference.answer}</div>)}
+            {!!question.intakeAnswers?.length&&<details className="notice"><summary>{{ja:'追加質問への回答',en:'Intake answers',vi:'Câu trả lời bổ sung'}[language]}</summary><ul>{question.intakeAnswers.map((row,index)=><li key={index}>{row.text}</li>)}</ul></details>}
+            {manager&&<details className="notice"><summary>相談の整理{question.consultation?' · '+({troubleshooting:'トラブル解決',procedure:'業務手続き',work_instruction:'作業方法',information_support:'情報・翻訳',unknown:'分類不明'}[question.consultation.primary]):''}</summary>
+              {question.consultation&&<><p>危険度：{{normal:'通常',caution:'要注意',emergency:'緊急',unknown:'不明'}[question.consultation.risk]}</p><ul>{question.consultation.facts.map((fact,index)=><li key={index}>{{confirmed:'確認済み',inferred:'推測',unknown:'未確認',conflicting:'矛盾'}[fact.state]}：{fact.value}</li>)}</ul></>}
+              <button className="secondary" disabled={busy} onClick={()=>run(async()=>{await send({action:'reclassify',id:question.id});await refresh(token);})}>会話を再分類</button></details>}
             <div className="messages">{question.messages.map(row=>{const own=row.senderId===data.profile.id,key=question.id+':'+row.id+':'+language,originalLanguage=row.sourceLanguage??(row.role==='manager'?'ja':question.originalLanguage),translated=chatTranslations[key]||(row.targetLanguage===language?row.translatedText:'');
               return <article key={row.id} className={'bubble '+(own?'own':'')}><small>{row.senderName?row.senderName+' · ':''}{t(row.role)} · {new Date(row.createdAt).toLocaleString(language)}</small>
               <p>{!own&&translated?translated:row.originalText}</p>
@@ -284,7 +297,7 @@ export default function BridgeWork() {
               });}}><input aria-label={t('message')} placeholder={t('message')} value={message} onChange={event => setMessage(event.target.value)} maxLength={3000} required/>
                 {voiceSupported&&<button type="button" className="secondary" disabled={busy||listening} onClick={()=>dictate('reply')}>{listening?t('listening'):t('voice')}</button>}
                 <button disabled={busy || !message.trim()}>{t('reply')} →</button></form>}
-              {!manager && <div className="actions"><button type="button" className="secondary" disabled={busy} onClick={() => run(async () => {
+              {!manager && <div className="actions"><button type="button" className="resolve-cta" disabled={busy} onClick={() => run(async () => {
                 const resolved = await send<Question>({action:'resolve', id:question.id});
                 setData(current => current && {...current, questions: current.questions.map(row =>
                   row.id === resolved.id && row.siteId === resolved.siteId ? resolved : row)});
@@ -314,7 +327,7 @@ export default function BridgeWork() {
               </div>
               {reviewManual ? <label className="manual-picker">マニュアルを選択
                 <select value={reviewManual.id} onChange={event=>setManualId(event.target.value)}>
-                  {manuals.filter(row=>row.status===manualStatus).map(row=><option value={row.id} key={row.id}>{row.content.title}（{row.status==='published'?'公開済':isGenerating(row)?'生成中':row.reviewState==='awaiting_answers'?'追加質問待ち':row.generation?.error==='source-review-required'?'生成前の確認待ち':row.reviewState==='held'?'保留':'承認待ち'}）</option>)}
+                  {manuals.filter(row=>row.status===manualStatus).map(row=><option value={row.id} key={row.id}>{row.content.title}（{row.status==='published'?'公開済':isGenerating(row)?'生成中':row.reviewState==='awaiting_answers'?'追加質問待ち':row.generation?.error==='source-review-required'?'生成前の確認待ち':row.reviewState==='archived'?'アーカイブ済み':row.reviewState==='held'?'保留':'承認待ち'}）</option>)}
                 </select>
               </label> : <p className="empty">{t('empty')}</p>}
             </section>
@@ -344,7 +357,7 @@ export default function BridgeWork() {
                 <span className="tile">▤</span><span className="row-text"><strong>{(row.translations[language] ?? row.content).title}</strong><small>{siteName(row.siteId)}</small></span>
                 <span>›</span></button>)}</div> : <p className="empty">{t('empty')}</p>}
             </section>
-            {manual && <ManualView manual={manual} language={language} onEvent={manualEvent(manual)}/>}
+            {manual&&<><ManualView manual={manual} language={language} onEvent={manualEvent(manual)}/>{reportGuide(manual)}</>}
           </>}
         </>}
         <footer>Bridge Work <span>·</span> {siteName(site)}</footer>

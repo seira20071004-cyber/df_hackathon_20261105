@@ -31,6 +31,8 @@ test('SDK pipeline, supplements, approval, sessions and escalation remain scoped
   const before=Date.now();await api('linh',{action:'resolve',id});assert.ok(Date.now()-before<2000,'Resolution must not wait for Gemini');await api('linh',{action:'resolve',id});
   const matches=(await api('sato')).manuals.filter(manual=>manual.sourceQuestionIds.includes(id));assert.equal(matches.length,1);assert.equal(matches[0].program,undefined);await approve(matches[0].id);return {id,manual:matches[0]};}
  async function completed(id){let manual;for(let i=0;i<150;i++){manual=(await api('sato')).manuals.find(row=>row.id===id);if(['ready','failed','held','awaiting_answers'].includes(manual.generation?.state))return manual;await new Promise(resolve=>setTimeout(resolve,100));}assert.fail(JSON.stringify(manual)+'\n'+log);}
+ const blocked=await api('linh',{action:'adaptiveSearch',text:'薬品がこぼれた',language:'ja',answers:[]});assert.equal(blocked.adaptive.mode,'safety');assert.deepEqual(blocked.matches,[]);
+ const adaptive=await api('linh',{action:'adaptiveSearch',text:'Tôi không thể quét mã vạch.',language:'vi',answers:[]});assert.equal(adaptive.adaptive.analysis.primary,'troubleshooting');assert.ok(adaptive.matches.some(row=>row.id==='demo-interactive-manual'));assert.ok(!adaptive.matches.some(row=>row.id==='foreign-manual'));
  const assignedId=randomUUID();await api('linh',{action:'ask',id:assignedId,text:'担当者テスト',language:'ja'});
  const assign=actor=>fetch(url,{method:'POST',headers:{Authorization:'Bearer '+actor,'Content-Type':'application/json'},body:JSON.stringify({action:'assign',siteId:'sakura',id:assignedId})});
  const claims=await Promise.all([assign('sato'),assign('tanaka')]);assert.deepEqual(claims.map(row=>row.status).sort(),[200,409]);
@@ -61,7 +63,11 @@ test('SDK pipeline, supplements, approval, sessions and escalation remain scoped
  assert.equal((await api('alex',{action:'search',text:'全く違う問題',language:'ja'})).matches.length,0);
  assert.equal((await api('alex',{action:'search',text:'低類似度の質問',language:'ja'})).matches.length,0);
  await api('alex',{action:'viewManual',id:'foreign-manual',version:seed.manuals.at(-1).updatedAt},404);assert.equal((await api('sato')).manuals.some(row=>row.id==='foreign-manual'),false);
- await api('sato',{action:'manualState',id:manual.id,version:manual.updatedAt,mode:'unpublish'});
+ await api('alex',{action:'reportManual',id:manual.id,version:manual.updatedAt,reason:'outdated'});
+ assert.equal((await api('sato')).manuals.find(row=>row.id===manual.id).feedback.length,1);
+ assert.equal((await api('alex')).manuals.find(row=>row.id===manual.id).feedback,undefined);
+ const archived=await api('sato',{action:'manualState',id:manual.id,version:manual.updatedAt,mode:'archive'});assert.equal(archived.reviewState,'archived');
+ await api('alex',{action:'reportManual',id:manual.id,version:manual.updatedAt,reason:'outdated'},404);
  assert.equal((await api('alex')).manuals.some(row=>row.id===manual.id),false);await api('alex',event('start',[],randomUUID()),404);
  const gapSource=await resolveQuestion('追加確認の商品登録');let gap=await completed(gapSource.manual.id);assert.equal(gap.reviewState,'awaiting_answers');assert.equal(gap.clarification.round,1);
  const originalMessages=(await api('sato')).questions.find(row=>row.id===gapSource.id).messages;

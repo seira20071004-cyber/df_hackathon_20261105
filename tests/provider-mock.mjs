@@ -24,7 +24,17 @@ globalThis.fetch = async (url,options) => {
   if(context.question?.includes('利用枠エラー'))return Response.json({error:{code:429,message:'mock quota',status:'RESOURCE_EXHAUSTED'}},{status:429});
   if(context.question?.includes('不正JSON'))return Response.json({candidates:[{content:{parts:[{text:'{"broken":'}]}}]});
   let result;
-  if(schema?.properties?.hasAlternativeMethods) {
+  if(schema?.properties?.primary&&schema.properties.facts){
+    const source=input.sources[0],text=source.text;
+    const primary=/返金|シフト/.test(text)?'procedure':/洗剤|清掃場所/.test(text)?'work_instruction':/作業指示書|配送先/.test(text)?'information_support':'troubleshooting';
+    const barcode=/バーコード|mã vạch/i.test(text),needs=demo&&barcode&&input.sources.length===1&&!/汚れ|機種|quầy|bẩn/i.test(text);
+    result={primary,secondary:[],risk:'normal',facts:[{field:'symptom',state:'confirmed',value:text.slice(0,200),sourceId:source.id,quote:text.slice(0,200)}],question:needs?{field:'situation',text:input.language==='vi'?'Bạn đang quét mã vạch ở đâu?':input.language==='en'?'Where are you scanning the barcode?':'どこでバーコードを読み取っていますか？',options:input.language==='vi'?['Tại quầy thu ngân']:input.language==='en'?['At the checkout']:['レジで']}:null};
+  } else if(schema?.properties?.decision){
+    result={decision:'new_manual',manualId:null};
+  } else if(schema?.properties?.ratings){
+    const original=input.sources[0].text,barcode=/バーコード|mã vạch/i.test(original),needs=demo&&barcode&&input.sources.length===1&&!/汚れ|機種|quầy|bẩn/i.test(original);
+    result={ratings:input.candidates.map(row=>({id:row.id,verdict:barcode&&/バーコード|商品|mã vạch/i.test(row.title)?(needs?'needs_clarification':'applicable'):'not_applicable'})),question:null};
+  } else if(schema?.properties?.hasAlternativeMethods) {
     const source=input.sources.find(source=>source.role==='manager');
     const supplemented=input.sources.some(source=>source.role==='manager_supplement');
     const quote=input.question.includes('根拠失敗')?'存在しない指示':source.text;
