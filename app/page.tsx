@@ -10,7 +10,7 @@ import {ChatMessages} from './chat-messages';
 import type {AdaptiveDetails,IntakeAnswer} from '../lib/adaptive';
 import {OrganizationEntry} from './organization-entry';
 import {GOOGLE_SESSION,googleAuthClient,googleSessionToken,signOutGoogle,type GoogleConfig} from './google-session';
-import {Settings,WorkspaceShell,type AppTab} from './workspace-shell';
+import {Brand,Settings,WorkspaceShell,type AppTab} from './workspace-shell';
 import {bridgeFetch} from './app-check';
 import type {ManualEvent} from './manual-guide';
 import { languageNames, languages, type Language, type Manual, type Match, type Question, type Workspace } from '../lib/model';
@@ -29,9 +29,6 @@ function speechRecognition() {
   return browser.SpeechRecognition ?? browser.webkitSpeechRecognition;
 }
 
-function Brand() {
-  return <div className="brand"><span className="brand-icon" aria-hidden="true"><svg viewBox="0 0 32 32" width="34" height="34" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 6h15a2 2 0 0 1 2 2v10H11l-6 5V8a2 2 0 0 1 2-2Z"/><path d="M23 12h4a2 2 0 0 1 2 2v13l-5-4h-8a2 2 0 0 1-2-2"/></svg></span><div>Bridge<span>Work</span><small>WORKPLACE SUPPORT</small></div></div>;
-}
 function Badge({children, variant = ''}: {children: ReactNode; variant?: string}) {
   return <span className={'badge ' + variant}>{children}</span>;
 }
@@ -300,7 +297,7 @@ export default function BridgeWork() {
               <button className="secondary" disabled={busy} onClick={() => run(async () => {await refresh(token);})}>{t('refresh')}</button>
             </div>
             {manager&&<div className="stats" role="group" aria-label="対応状況">
-              {(['new','active','resolved'] as const).map(status=><button type="button" className="panel stat" key={status}
+              {(['new','active','resolved'] as const).map(status=><button type="button" className="panel stat" key={status} data-status={status}
                 aria-pressed={statusFilter===status} onClick={()=>{setStatusFilter(status);setSelected('');}}>
                 <Badge variant={status}>{t(status)}</Badge><strong>{questions.filter(row=>row.status===status).length}</strong>
               </button>)}

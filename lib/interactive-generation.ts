@@ -5,7 +5,7 @@ import type {Profile,Question} from './model';
 import {CONTACT_TEXT,extractedChatSchema,gapSchema,graphIssues,programSchema,qualityIssues,qualitySchema,
   type AdditionalAnswer,type ExtractedChat,type GapQuestion,type ManualProgram,type QualityReport} from './manual-graph.ts';
 
-export const INTERACTIVE_PROMPT_VERSION='bridge-interactive-v1.1';
+export const INTERACTIVE_PROMPT_VERSION='bridge-interactive-v1.2';
 export const MAX_QUESTION_ROUNDS=3,MAX_REPAIRS=2;
 export type AiCall=<T>(schema:z.ZodType<T>,instruction:string,data:unknown,options?:{model?:string;timeoutMs?:number})=>Promise<T>;
 export type Stage='analyzing'|'checking_gaps'|'writing'|'validating';
@@ -36,6 +36,7 @@ previousQuestionsとanswersを読み、回答済みの同じ質問を繰り返�
   design:policy+`
 工程3：元の会話で確認できた困りごとと対処法を、第三者が読んですぐ理解できるよう日本語で要約します。タイトルは困りごと、概要は症状・対象や適用場面を短くまとめます。雑談や発言者名、会話の逐語的な繰り返しを省き、対処法は実際に案内・確認された順序で簡潔に書きます。作業範囲、数量、例外、注意は削りません。current factsだけから必要なUIブロックを選びます。attemptを解決手順に含めない。troubleshootingは裏づけのある分岐、procedureは順番と明記された承認を分ける、work_instructionは確認できる作業項目、information_supportは用語と説明を優先します。裏づけが足りない場合にブロックの種類を強制しません。languageはja。STEPは1動作、BRANCHは確認済み条件、WARNINGは根拠ある注意、CHECKは管理者が示した解決基準。
 step: title,content,supplement,nextBlockId,restricted,authorizationSourceMessageIds。危険作業はrestricted=trueで許可の根拠が必須。不明なら操作を書かず管理者に確認します。
+タイトルと対処法を確定する前に、sourcesの相談チャットを最初の相談から最後の返信まで照合します。冒頭の相談文やAIによる聞き取りだけで決めず、その後の返信で確定した対象・症状をタイトルに反映します。「トラブルの対処法」など対象が分からない見出しを避けます。STEPの見出しと本文には、管理者が案内した具体的な対象と動作を書きます。スタッフが結果を報告した場合は、何が有効だったかの確認に使います。後の発言で撤回・訂正された操作や、失敗した試行を対処法に入れません。追加回答は会話で不足した事項の補足に使います。
 branch: question,choices[{id,label,nextBlockId}]。各選択肢は2～4個。意味のない分岐を作りません。
 warning: content,severity(notice/stop),nextBlockId。stopは必ずnextBlockId=null。一般的な安全知識を創作しません。
 check: content,successNextBlockId=null,failureNextBlockId。失敗時は根拠ある別手順へ、なければnull(管理者へ連絡)。
@@ -46,6 +47,7 @@ check: content,successNextBlockId=null,failureNextBlockId。失敗時は根拠�
 工程4：作成者の結論を信用せず、sources、facts、candidateを比較します。正確性accurate、完全性complete、明瞭性clear、安全性safeを返します。
 すべてのブロックidについてchecksをちょうど1件ずつ返し、supported/conditionsPreserved/safe/clearを評価します。引用が実在するだけでは意味を裏づけたことにしません。
 タイトル・概要も元の会話に基づく要約か照合します。重要な対処法や注意の欠落、創作した条件、複数操作の詰め込み、危険操作の権限不足、訂正前の情報、解決基準の創作は不合格。
+最初の相談と後続の返信を直接読み、タイトルの対象・症状とSTEPの対象・動作・順序を突き合わせます。タイトルが確定した対象を取り違える場合や、対処法が一般論だけでチャットの具体的な案内を落としている場合も不合格にします。タイトルの不一致はaccurate=false、具体的な対処法の欠落はcomplete=falseにします。
 issuesはblockId(全体ならnull)、category、短いmessage。一般論の追加で修正しません。構造チェックのerrorsも確認します。`
 };
 const redact=(value:string,name:string)=>value.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,'[メールアドレス]')

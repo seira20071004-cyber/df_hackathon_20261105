@@ -4,6 +4,17 @@ import {copy} from '../lib/copy';
 import {languageNames,languages,type Language,type Profile} from '../lib/model';
 
 export type AppTab='home'|'cases'|'manuals'|'members'|'settings';
+export function Brand({compact=false}:{compact?:boolean}) {
+  return <div className="brand">
+    <span className="brand-icon" aria-hidden="true">
+      <svg viewBox="0 0 32 32" width={compact?26:34} height={compact?26:34} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M5 6h15a2 2 0 0 1 2 2v10H11l-6 5V8a2 2 0 0 1 2-2Z"/>
+        <path d="M23 12h4a2 2 0 0 1 2 2v13l-5-4h-8a2 2 0 0 1-2-2"/>
+      </svg>
+    </span>
+    <div>Bridge <span>Work</span>{!compact&&<small>WORKPLACE SUPPORT</small>}</div>
+  </div>;
+}
 const labels={ja:{navigation:'画面切り替え',members:'メンバー',settings:'設定',consultations:'相談',account:'アカウント情報',name:'氏名',company:'会社名',role:'立場',unset:'未登録',site:'現場',language:'表示言語'},
   en:{navigation:'Navigation',members:'Members',settings:'Settings',consultations:'Consultations',account:'Account information',name:'Name',company:'Company',role:'Role',unset:'Not provided',site:'Site',language:'Display language'},
   vi:{navigation:'Điều hướng',members:'Thành viên',settings:'Cài đặt',consultations:'Trao đổi',account:'Thông tin tài khoản',name:'Họ tên',company:'Công ty',role:'Vai trò',unset:'Chưa đăng ký',site:'Địa điểm',language:'Ngôn ngữ hiển thị'}};
@@ -43,7 +54,7 @@ export function WorkspaceShell({profile,language,tab,unread,demo,onNavigate,onSi
   },[account]);
   return <div className="workspace-layout">
     <header className="workspace-topbar"><div className="workspace-heading">
-      <span className="shell-brand">Bridge<span>Work</span></span><span className="shell-separator"/><strong>{name(tab)}</strong>
+      <Brand compact/>
     </div><div className="workspace-topright">{demo&&<span className="badge demo shell-demo">{t('demo')}</span>}
       <div className="account-control"><button ref={accountButton} type="button" className="account-circle" aria-label={text.account} aria-expanded={account} aria-controls="account-popover" onClick={()=>{setAccount(!account);}}>{profile.photo&&/^https:\/\/lh[0-9]+\.googleusercontent\.com\//.test(profile.photo)?<img src={profile.photo} alt="" referrerPolicy="no-referrer"/>:<Icon name="person"/>}</button>
         {account&&<div ref={popover} tabIndex={-1} role="dialog" aria-label={text.account} id="account-popover" className="account-popover">
