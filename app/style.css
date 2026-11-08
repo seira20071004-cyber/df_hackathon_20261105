@@ -166,12 +166,8 @@ nav { display:grid; gap:5px; }
 .source-message.manager .source-avatar { background:#155bdd; color:white; }
 .source-message strong { display:block; font-size:.82rem; padding-bottom:6px; }
 .source-message p { padding:12px 14px; border-radius:12px; background:#f0f3f8; line-height:1.85; white-space:pre-wrap; }
-.source-message.highlighted p { background:#deebff; border:1px solid #8db3ef; }
 .review-preview-body { padding:12px; }
 .review-preview .manual-document { box-shadow:none; border:0; }
-.evidence-callout { border:1px solid #b9cfee; border-radius:9px; overflow:hidden; margin-top:12px; background:#f0f6ff; }
-.evidence-callout > strong { display:block; padding:9px 12px; border-bottom:1px solid #cdddF3; background:#e3edfc; font-size:.83rem; }
-.evidence-callout blockquote { padding:12px; margin:0; font-size:.86rem; line-height:1.8; }
 .review-approval { display:flex; justify-content:space-between; align-items:center; gap:15px; flex-wrap:wrap; border:1px solid #d8e2ef; padding:17px; border-radius:12px; background:#fbfdff; }
 .manual-status-tabs { display:flex; border-bottom:1px solid #d9e3ef; gap:12px; }
 .manual-status-tabs button { background:transparent; color:#4f6078; border-radius:0; border-bottom:3px solid transparent; padding:12px 17px; }
@@ -389,3 +385,5 @@ footer { color:var(--muted); font-size:.8rem; text-align:center; padding:8px; }
 .chat-composer .chat-send{border-radius:50%;min-width:44px;min-height:44px;padding:0;font-size:1.2rem}
 @media(max-width:720px){.workspace-content{padding-bottom:calc(86px + env(safe-area-inset-bottom))}.chat-screen>.messages{flex:1}.chat-screen{display:flex;flex-direction:column}}
 @media print{.staff-bottom{display:none!important}}
+.manual-summary-steps { padding-inline-start:1.5em; }
+.manual-summary-steps li { white-space:pre-line; padding:.35em 0; }

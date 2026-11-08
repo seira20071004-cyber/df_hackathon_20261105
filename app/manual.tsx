@@ -13,14 +13,14 @@ import {categoryLabels,type ManualApplicability} from '../lib/adaptive';
 import {ManualAccessEditor} from './manual-access-editor';
 import type {ManualAccess} from '../lib/manual-access';
 import type {StaffRecipient} from '../lib/model';
-import type {ManualProgram} from '../lib/manual-graph';
+import {paperProgram,type ManualProgram} from '../lib/manual-graph';
 
 export function isGenerating(manual: Manual) {
   return Boolean(manual.generation && ['queued','analyzing','checking_gaps','writing','validating','illustrating'].includes(manual.generation.state) &&
     Date.now() - Date.parse(manual.generation.startedAt) < 300_000);
 }
 
-export function ManualView({manual, language, onSelectStep,onSelectBlock,onEvent,contextText}: {manual: Manual; language: Language; onSelectStep?:(index:number)=>void;onSelectBlock?:(id:string)=>void;onEvent?:ManualEvent;contextText?:string}) {
+export function ManualView({manual, language, onEvent,contextText}: {manual: Manual; language: Language; onEvent?:ManualEvent;contextText?:string}) {
   const [displayLanguage,setDisplayLanguage] = useState(language);
   const documentRef=useRef<HTMLElement>(null);
   const [exporting,setExporting]=useState(false);
@@ -57,7 +57,7 @@ export function ManualView({manual, language, onSelectStep,onSelectBlock,onEvent
       <h2>{content.title}</h2>
       {displayLanguage !== 'ja' && !manual.translations[displayLanguage] && <p className="manual-language">{t('onlyJapanese')}</p>}
     </header>
-    {program?<ManualGuide key={manual.id+manual.updatedAt+displayLanguage} manual={manual} program={program} language={displayLanguage} onEvent={onEvent} onBlock={onSelectBlock} contextText={contextText}/>:<><section className="manual-procedure">
+    {program?<ManualGuide key={manual.id+manual.updatedAt+displayLanguage} manual={manual} program={program} language={displayLanguage} onEvent={onEvent} contextText={contextText}/>:<><section className="manual-procedure">
       <div className="manual-section-heading"><h3>{t('procedure')}</h3></div>
       {range && <RangeDiagram range={range} language={displayLanguage}/>}
       {figuresAt(-1)}
@@ -68,8 +68,7 @@ export function ManualView({manual, language, onSelectStep,onSelectBlock,onEvent
             {perStep && manual.imageUrls[index] ? <img src={manual.imageUrls[index]} alt={step} loading="lazy"/> :
               <span className="procedure-symbol" aria-hidden="true">{index === content.steps.length - 1 ? '✓' : '→'}</span>}
           </div>}
-          {onSelectStep ? <button className="procedure-text" onClick={()=>onSelectStep(index)}><span aria-hidden="true">{range ? '✓' : String(index+1).padStart(2,'0')}</span>{step}</button> :
-            <p className="procedure-text"><span aria-hidden="true">{range ? '✓' : String(index+1).padStart(2,'0')}</span>{step}</p>}
+          <p className="procedure-text"><span aria-hidden="true">{range ? '✓' : String(index+1).padStart(2,'0')}</span>{step}</p>
           {figuresAt(index)}
         </li>)}
       </ol>
@@ -127,17 +126,8 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
   const generating = isGenerating(manual);
   const state = manual.generation?.state;
   const [editing,setEditing] = useState(false);
-  const [selectedStep,setSelectedStep] = useState(0);
-  const [selectedBlock,setSelectedBlock]=useState('');
   const sources = questions.filter(question => manual.sourceQuestionIds.includes(question.id));
-  const block=manual.program?.blocks.find(block=>block.id===selectedBlock);
-  const citations = block?[
-    ...(manual.extraction?.facts.flatMap(fact=>fact.evidence).filter(source=>block.sourceMessageIds.includes(source.messageId))??[]),
-    ...(manual.clarification?.answers.filter(answer=>block.sourceMessageIds.includes(answer.id)).map(answer=>({messageId:answer.id,quote:answer.answer}))??[])
-  ]:manual.evidence?.steps[selectedStep] ?? [];
-  const highlighted = new Set(citations.map(citation=>citation.messageId));
-  const fallbackReply = sources.flatMap(source=>source.messages).filter(message=>message.role==='manager').at(-1);
-  if (!highlighted.size && fallbackReply) highlighted.add(fallbackReply.id);
+  const summary=manual.program?paperProgram(manual.program):manual.content;
   const needsSource=manual.status==='draft'&&manual.generation?.error==='source-review-required';
   const stateLabel = needsSource?'生成前の確認待ち':generating ? state === 'illustrating' ? '任意の図解を生成中' : state==='validating' ? '品質と原文との一致を検証中' : state==='checking_gaps'?'重要な不足情報を確認中':state==='analyzing' ? '確定情報と訂正を抽出中' : 'ブロック構成を設計中' :
     manual.status==='published'?'確認済みのマニュアル':manual.reviewState==='awaiting_answers'?'管理者への追加質問があります':manual.reviewState==='rejected'?'却下したマニュアル':manual.reviewState==='archived'?'アーカイブ済み':manual.generation?.error==='safety-review'?'安全確認が必要なため保留':manual.reviewState==='held'?'保留中のマニュアル':state==='failed'?'生成内容の確認が必要です':'承認待ちのマニュアル';
@@ -194,24 +184,32 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
         <div className="review-conversation-body">{sources.length ? sources.map(question => <div className="flow" key={question.id}>
           <article className="source-message employee"><span className="source-avatar" aria-hidden="true">人</span><div><strong>スタッフ</strong>
             <p>{question.japaneseText || question.originalText}</p></div></article>
-          {question.messages.map(message=><article key={message.id} className={'source-message '+message.role+(highlighted.has(message.id) ? ' highlighted' : '')}>
+          {question.messages.map(message=><article key={message.id} className={'source-message '+message.role}>
             <span className="source-avatar" aria-hidden="true">{message.role==='manager' ? '管' : '人'}</span><div>
               <strong>{message.role==='manager' ? '管理者' : 'スタッフ'}</strong><p>{message.role==='manager' ? message.originalText : message.translatedText || message.originalText}</p>
             </div>
           </article>)}
         </div>) : <p className="muted">参照した会話がありません。</p>}
           {Boolean(manual.clarification?.answers.length)&&<div className="supplement-sources"><h4>管理者の追加情報（元のチャットとは別に保存）</h4>
-            {manual.clarification!.answers.map(answer=><article className={'source-message manager'+(highlighted.has(answer.id)?' highlighted':'')} key={answer.id}><div>
+            {manual.clarification!.answers.map(answer=><article className="source-message manager" key={answer.id}><div>
               <strong>{answer.question}</strong><p>{answer.answer}</p><small>{new Date(answer.createdAt).toLocaleString('ja-JP')}</small></div></article>)}
           </div>}
         </div>
       </section>
       <section className="review-preview">
         <h3 className="review-column-heading"><span aria-hidden="true">▤</span>作成されたマニュアル（プレビュー）</h3>
-        <div className="review-preview-body"><ManualView manual={manual} language="ja" onSelectStep={setSelectedStep} onSelectBlock={setSelectedBlock}/>
-          {(citations.length>0 || fallbackReply) && <aside className="evidence-callout"><strong><span aria-hidden="true">↔</span> 根拠となる回答</strong>
-            {(citations.length ? citations.map(source=>source.quote) : [fallbackReply!.originalText]).map((quote,index)=><blockquote key={index}>「{quote}」</blockquote>)}
-          </aside>}
+        <div className="review-preview-body flow">
+          {generating&&!manual.program?<p role="status">会話から要約を作成しています。</p>:
+            <article className="manual-document flow">
+              <h4>{summary.title}</h4>
+              {summary.purpose&&summary.purpose!==summary.title&&<p>{summary.purpose}</p>}
+              <section aria-label="対処法の要約">
+                <h4>対処法</h4>
+                <ol className="manual-summary-steps">{summary.steps.map((step,index)=><li key={index}>{step}</li>)}</ol>
+              </section>
+              {summary.cautions.length>0&&<section><h4>注意事項</h4><ul>{summary.cautions.map((caution,index)=><li key={index}>{caution}</li>)}</ul></section>}
+            </article>}
+          {!generating&&<details><summary>マニュアルを操作・ダウンロード</summary><ManualView manual={manual} language="ja"/></details>}
         </div>
       </section>
     </div>

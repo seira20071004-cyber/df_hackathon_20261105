@@ -7,13 +7,12 @@ const words={ja:{start:'マニュアルを開始',next:'次へ',back:'前へ',qu
   en:{start:'Start guide',next:'Continue',back:'Back',question:'Choose your situation',unknown:'Not sure — ask a manager',solved:'Resolved',failed:'Not resolved',contact:'Ask your manager',contactTitle:'Check with your manager',contactNote:'Do not try actions that this guide cannot confirm. Continue in a conversation.',details:'What do you need help with?',done:'Your resolution has been recorded',preview:'Preview: results are not recorded.',restart:'Start again',error:'Could not record this action. Please try again.'},
   vi:{start:'Bắt đầu hướng dẫn',next:'Tiếp tục',back:'Quay lại',question:'Chọn tình huống của bạn',unknown:'Không rõ — hỏi quản lý',solved:'Đã giải quyết',failed:'Chưa giải quyết',contact:'Hỏi người quản lý',contactTitle:'Hãy xác nhận với quản lý',contactNote:'Không thực hiện thao tác mà tài liệu chưa xác nhận. Tiếp tục trao đổi với quản lý.',details:'Bạn đang gặp khó khăn gì?',done:'Đã ghi nhận việc giải quyết',preview:'Bản xem trước: không ghi nhận kết quả.',restart:'Xem lại từ đầu',error:'Không ghi nhận được thao tác. Vui lòng thử lại.'}};
 
-export function ManualGuide({manual,program,language,onEvent,onBlock,contextText}:{manual:Manual;program:ManualProgram;language:Language;onEvent?:ManualEvent;onBlock?:(id:string)=>void;contextText?:string}){
+export function ManualGuide({manual,program,language,onEvent,contextText}:{manual:Manual;program:ManualProgram;language:Language;onEvent?:ManualEvent;contextText?:string}){
   const text=words[language];
   const [run,setRun]=useState(()=>crypto.randomUUID()),[trail,setTrail]=useState<string[]>([]),[contact,setContact]=useState(false),[done,setDone]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const [overview,setOverview]=useState(false);
   const [question,setQuestion]=useState(contextText||program.title);
   const current=program.blocks.find(block=>block.id===trail.at(-1));
-  useEffect(()=>{if(current)onBlock?.(current.id);},[current?.id,onBlock]);
   function next(target:string|null){setError('');if(target===null){openContact();return;}setTrail(current=>[...current,target]);}
   function openContact(){
     const labels={ja:['最初の相談','参照したマニュアル','進んだ手順・選択','未解決の内容'],en:['Original question','Guide opened','Steps and choices followed','Still unresolved'],vi:['Câu hỏi ban đầu','Hướng dẫn đã xem','Các bước và lựa chọn đã đi qua','Vấn đề chưa giải quyết']}[language];

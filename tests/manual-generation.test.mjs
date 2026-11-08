@@ -93,7 +93,7 @@ test('SDK pipeline, supplements, approval, sessions and escalation remain scoped
  await api(other,{action:'reply',id:assignedId,messageId:randomUUID(),text:'担当者ではない'},409);
  const handoff=await api(winner,{action:'assign',id:assignedId,managerId:other});assert.equal(handoff.assigneeId,other);assert.equal(handoff.assignments.length,2);
  const source=await resolveQuestion('商品が読み取れません');let manual=await completed(source.manual.id);
- assert.equal(manual.generation.state,'ready',JSON.stringify(manual)+'\n'+log);assert.equal(manual.pipeline.promptVersion,'bridge-interactive-v1.0');assert.equal(manual.pipeline.verification,'passed');
+ assert.equal(manual.generation.state,'ready',JSON.stringify(manual)+'\n'+log);assert.equal(manual.pipeline.promptVersion,'bridge-interactive-v1.1');assert.equal(manual.pipeline.verification,'passed');
  assert.deepEqual(manual.imageUrls,[]);assert.ok(manual.program.blocks.some(block=>block.type==='check'));assert.equal(manual.extraction.causeKnown,false);
  await api('sato',{action:'viewManual',id:manual.id,version:manual.updatedAt},403);
  await api('linh',{action:'saveProgram',id:manual.id,version:manual.updatedAt,program:manual.program,publish:true,confirmPermissions:true},403);
