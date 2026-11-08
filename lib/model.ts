@@ -29,7 +29,7 @@ export interface Question {
   organizationId: string;
   siteId: string;
   consultation?:import('./adaptive').Analysis;
-  intakeAnswers?:{field:string;text:string;prompt?:string}[];
+  intakeAnswers?:import('./adaptive').IntakeAnswer[];
   assigneeId?:string;
   assigneeName?:string;
   assignments?:{by:string;to:string;at:string}[];

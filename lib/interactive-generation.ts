@@ -55,7 +55,7 @@ export function generationContext(profile:Profile,question:Question,answers:Addi
   if(question.status!=='resolved')throw new Error('source-not-resolved');
   const text=(value:string)=>options.raw?value:redact(value,profile.name);
   const sources=[{id:'question:'+question.id,role:'employee',text:text(question.originalText),japaneseReference:text(question.japaneseText)},
-    ...(question.intakeAnswers??[]).map((answer,index)=>({id:'intake:'+index,role:'employee',text:text(answer.text),japaneseReference:''})),
+    ...(question.intakeAnswers??[]).flatMap((answer,index)=>answer.unknown?[]:[{id:'intake:'+index,role:'employee',text:text(answer.text),japaneseReference:''}]),
     ...question.messages.map(message=>({id:message.id,role:message.role,text:text(message.originalText),japaneseReference:text(message.translatedText)})),
     {id:'resolved:'+question.id,role:'system',text:'スタッフが解決ボタンを押しました。成功した操作の特定を意味しません。',japaneseReference:''},
     ...answers.map(answer=>({id:answer.id,role:'manager_supplement',text:text(answer.answer),japaneseReference:''}))];

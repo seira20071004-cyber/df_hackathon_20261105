@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {analysisSchema,applicableIds,compatibleCodes,nextClarification,reconcileAnalysis} from '../lib/adaptive.ts';
+import {analysisSchema,applicableIds,compatibleCodes,intakeSources,nextClarification,reconcileAnalysis} from '../lib/adaptive.ts';
 const cases=[
  ['バーコードが読み取れない','troubleshooting','normal'],['レジの画面が固まった','troubleshooting','normal'],
  ['返金を求められた','procedure','normal'],['電子決済が失敗する','troubleshooting','normal'],
@@ -36,6 +36,13 @@ test('photo observations never confirm facts and local danger retains its eviden
  const value=reconcileAnalysis(ai,[{id:'photo:test',text:'Scanner'},{id:'input',text:'chemical spill'}]);
  assert.equal(value.facts[0].state,'inferred');
  assert.equal(value.risk,'emergency');assert.deepEqual(value.riskEvidence,[{sourceId:'input',quote:'chemical spill'}]);
+});
+test('skipping an intake question preserves its slot without supplying a fact',()=>{
+ const answers=[{field:'target',text:'わからない',unknown:true},{field:'error',text:'E-101'}];
+ assert.deepEqual(intakeSources(answers),[{id:'intake:1',text:'E-101'}]);
+ const analysis=reconcileAnalysis(analysisSchema.parse({primary:'troubleshooting',secondary:[],risk:'normal',facts:[],
+  question:{field:'target',text:'対象は何ですか？',options:[]}}),[]);
+ assert.equal(nextClarification(analysis,answers.map(answer=>answer.field)),null);
 });
 test('unknown IDs, duplicates, conditional, inapplicable and unsafe entries never pass',()=>{
  const ratings=[{id:'outside',verdict:'applicable'},{id:'yes',verdict:'applicable'},{id:'maybe',verdict:'needs_clarification'},{id:'duplicate',verdict:'applicable'},{id:'duplicate',verdict:'unsafe'},{id:'wrong',verdict:'not_applicable'}];

@@ -6,7 +6,7 @@ import { ManualReview, ManualView, isGenerating } from './manual';
 import {ManualInbox,ManualSend} from './manual-delivery';
 import {DocumentLibrary} from './document-library';
 import {AdaptiveIntake} from './adaptive-intake';
-import type {AdaptiveDetails} from '../lib/adaptive';
+import type {AdaptiveDetails,IntakeAnswer} from '../lib/adaptive';
 import {OrganizationEntry} from './organization-entry';
 import {GOOGLE_SESSION,googleAuthClient,googleSessionToken,signOutGoogle,type GoogleConfig} from './google-session';
 import {Settings,WorkspaceShell,type AppTab} from './workspace-shell';
@@ -53,7 +53,7 @@ export default function BridgeWork() {
   const [query,setQuery] = useState('');
   const [results,setResults] = useState<{matches: Match[]; ai: boolean;adaptive?:AdaptiveDetails;photoAnalyzed?:boolean}>();
   const [consultOpen,setConsultOpen]=useState(false);
-  const [intake,setIntake]=useState<{field:string;text:string;prompt?:string}[]>([]);
+  const [intake,setIntake]=useState<IntakeAnswer[]>([]);
   const [reported,setReported]=useState('');
   const [searching,setSearching]=useState(false);
   const [message,setMessage] = useState('');
@@ -260,14 +260,14 @@ export default function BridgeWork() {
           {consultOpen&&photoEnabled&&!manual&&<details className="panel photo-intake"><summary>{{ja:'写真を追加（任意）',en:'Add a photo (optional)',vi:'Thêm ảnh (không bắt buộc)'}[language]}</summary><p>{{ja:'個人情報が写っていない写真を選んでください。検索時に画像をAIで解析します。',en:'Choose a photo without personal information. AI analyzes it during the search.',vi:'Chọn ảnh không có thông tin cá nhân. AI sẽ phân tích ảnh khi tìm kiếm.'}[language]}</p><input type="file" aria-label="相談の写真" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={event=>{const file=event.target.files?.[0];if(!file){setPhoto(undefined);return;}run(async()=>{setPhoto(undefined);if(file.size>800_000)throw new Error('photo-too-large');const data=new Uint8Array(await file.arrayBuffer());let raw='';for(let i=0;i<data.length;i+=8192)raw+=String.fromCharCode(...data.subarray(i,i+8192));setPhoto({name:file.name,data:btoa(raw)});});}}/>{photo&&<div className="actions"><small>{photo.name}</small>{results&&<button type="button" className="secondary" disabled={busy} onClick={()=>searchConsultation()}>写真を含めて探す</button>}<button type="button" className="link" disabled={busy} onClick={()=>setPhoto(undefined)}>写真を外す</button></div>}{results?.photoAnalyzed===false&&<p className="notice">写真を解析できなかったため、文章で確認しました。</p>}</details>}
           {consultOpen&&searching&&<section className="panel flow search-progress" role="status"><div className="wave" aria-hidden="true">▂▅▃▇▅▂▃</div><strong>{t('searching')}</strong><p>{query}</p></section>}
           {consultOpen&&!manual&&intake.length>0&&<div className="messages intake-history">{intake.map((row,index)=><div className="intake-turn" key={index}>{row.prompt&&<p className="bubble">{row.prompt}</p>}<p className="bubble own">{row.text}</p></div>)}</div>}
-          {consultOpen&&results?.adaptive&&<AdaptiveIntake key={intake.length} details={results.adaptive} language={language} busy={busy} round={intake.length+1} onAnswer={(field,text)=>{const answers=[...intake,{field,text,prompt:results.adaptive?.question?.text}];setIntake(answers);searchConsultation(answers);}}/>}
+          {consultOpen&&results?.adaptive&&<AdaptiveIntake key={intake.length} details={results.adaptive} language={language} busy={busy} round={intake.length+1} onAnswer={(field,text,unknown)=>{const answers=[...intake,{field,text,prompt:results.adaptive?.question?.text,...(unknown?{unknown}:{})}];setIntake(answers);searchConsultation(answers);}}/>}
           {results && results.matches.length > 0 && <section className={'panel flow '+(manual?'opened-guide':'')} aria-label={t('similar')}>
             {!manual&&<><h2 id="related-knowledge" tabIndex={-1} ref={focusSearchResults}>{{ja:'該当するマニュアルが見つかりました',en:'We found a matching guide',vi:'Đã tìm thấy hướng dẫn phù hợp'}[language]}</h2>
             <p className="notice">{t('confirmSite')}</p>{!results.ai && <p className="muted">{t('fallback')}</p>}</>}
             {results.matches.filter(match=>!manual||match.id===manual.id).map(match => <article className="result flow" key={match.kind + match.id}>
               {!manual&&<><div className="eyebrow">{siteName(match.siteId)} · {t(match.kind === 'manual' ? 'manuals' : 'cases')}</div><h3>{match.title}</h3></>}
               {manual?.id === match.id ? <>
-                <ManualView manual={manual} language={language} onEvent={manualEvent(manual)} contextText={[query,...intake.map(row=>row.text)].join('\n')}/>
+                <ManualView manual={manual} language={language} onEvent={manualEvent(manual)} contextText={[query,...intake.filter(row=>!row.unknown).map(row=>row.text)].join('\n')}/>
                 {sourceLink(manual)}{reportGuide(manual)}
                 {!manual.program&&<button className="secondary" disabled={busy} onClick={() => ask(match)}>{t('selfResolve')}</button>}
               </> : <><p>{t('manualFits')}</p><div className="actions">

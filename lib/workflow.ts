@@ -13,14 +13,14 @@ import {accessPolicySchema,defaultAccess,publishableAccess} from './manual-acces
 import {digest} from './security-content';
 import {prepareProtectedSource,hideProtectedText,coversAnswers} from './protected-source';
 import {prepareManualSource} from './manuals';
-import {applicableIds,compatibleCodes,evaluationSchema,manualApplicabilitySchema,explicitRisk,nextClarification} from './adaptive';
+import {applicableIds,compatibleCodes,evaluationSchema,manualApplicabilitySchema,explicitRisk,intakeSources,nextClarification} from './adaptive';
 import {classifyConsultation,consultationPhotoSchema,observeConsultationPhoto} from './consultation';
 import {cosine,semanticHash,semanticText} from './semantic-search';
 import { isScoped, languageNames, languages, mayReadManual, mayReadQuestion, mayReuse, topic, type Language, type Manual, type Match, type Profile, type Question } from './model';
 import { deliverManual, isDemo, list, mutate,openPublishedManual,recordManualSession, resolveWithManual, setLanguage, setDisplayName, slug, staffRecipients, siteManagers, siteSafety } from './storage';
 
 const text = z.string().trim().min(1).max(3000);
-const intake=z.array(z.object({field:z.enum(['target','symptom','situation','error','attempt','result','missing']),text:z.string().trim().min(1).max(500),prompt:z.string().trim().min(1).max(200).optional()}).strict()).max(3);
+const intake=z.array(z.object({field:z.enum(['target','symptom','situation','error','attempt','result','missing']),text:z.string().trim().min(1).max(500),prompt:z.string().trim().min(1).max(200).optional(),unknown:z.literal(true).optional()}).strict()).max(3);
 const location = {siteId: slug};
 const record = {...location, id: slug};
 export const actionSchema = z.discriminatedUnion('action', [
@@ -154,7 +154,7 @@ export async function execute(profile: Profile, input: Action) {
     if(input.action==='ask'&&(input.intake||input.photo)){
       const safety=await siteSafety(profile,siteId),answers=input.intake??[];
       question.intakeAnswers=answers;
-      const sources=[{id:'question:'+question.id,text:input.text},...answers.map((row,index)=>({id:'intake:'+index,text:row.text,...(row.prompt?{prompt:row.prompt}:{})}))];
+      const sources=[{id:'question:'+question.id,text:input.text},...intakeSources(answers)];
       const photo=input.photo&&explicitRisk(sources.map(row=>row.text).join('\n'),safety?.keywords)==='unknown'?await observeConsultationPhoto(input.photo):null;
       question.consultation=await classifyConsultation([...sources,...(photo?[photo]:[])],input.language,safety?.keywords);
     }
@@ -213,10 +213,10 @@ export async function execute(profile: Profile, input: Action) {
   if (input.action === 'search'||input.action==='adaptiveSearch') {
     const adaptive=input.action==='adaptiveSearch';
     const safety=adaptive?await siteSafety(profile,siteId):undefined;
-    const source=[{id:'input',text:input.text},...(adaptive?input.answers.map((row,index)=>({id:'intake:'+index,text:row.text,...(row.prompt?{prompt:row.prompt}:{})})):[])];
+    const source=[{id:'input',text:input.text},...(adaptive?intakeSources(input.answers):[])];
     const localRisk=explicitRisk(source.map(row=>row.text).join('\n'),safety?.keywords);
     const photo=adaptive&&input.photo&&localRisk==='unknown'?await observeConsultationPhoto(input.photo):null;
-    const analysis=adaptive?await classifyConsultation([...source,...(photo?[photo]:[])],input.language,safety?.keywords):undefined;
+    const analysis=adaptive?await classifyConsultation([...source,...(photo?[photo]:[])],input.language,safety?.keywords,input.answers.filter(answer=>answer.unknown).map(answer=>answer.field)):undefined;
     const prior=adaptive?input.answers.map(row=>row.field):[];
     if(localRisk==='emergency'||localRisk==='caution'||analysis?.risk==='emergency'||analysis?.risk==='caution')return {matches:[],ai:false,adaptive:analysis?{analysis,mode:'safety',question:null,...(safety?{safety:{contact:safety.contact,instructions:safety.instructions}}:{})}:undefined};
     if(analysis?.risk==='unknown'){const question=nextClarification(analysis,prior);return {matches:[],ai:false,adaptive:{analysis,question,mode:question?'clarify':'handoff'},...(adaptive&&input.photo?{photoAnalyzed:Boolean(photo)}:{})};}
@@ -255,7 +255,7 @@ export async function execute(profile: Profile, input: Action) {
   }
   if(input.action==='reclassify'){
     assertRole(profile,'manager');const question=questions.find(row=>row.id===input.id);if(!question)throw new ApiError(404,'not-found');
-    const policy=await siteSafety(profile,siteId),sources=[{id:'question:'+question.id,text:question.originalText},...(question.intakeAnswers??[]).map((row,index)=>({id:'intake:'+index,text:row.text})),...question.messages.slice(-10).map(row=>({id:row.id,text:row.originalText}))];
+    const policy=await siteSafety(profile,siteId),sources=[{id:'question:'+question.id,text:question.originalText},...intakeSources(question.intakeAnswers??[]),...question.messages.slice(-10).map(row=>({id:row.id,text:row.originalText}))];
     const consultation=await classifyConsultation(sources,'ja',policy?.keywords);
     return mutate(profile,siteId,'questions',input.id,current=>{if(!current||current.messages.at(-1)?.id!==question.messages.at(-1)?.id)throw new ApiError(409,'conversation-updated');return {...current,consultation};});
   }

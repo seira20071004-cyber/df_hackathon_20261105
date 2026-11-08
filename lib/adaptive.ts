@@ -18,6 +18,12 @@ export const knowledgeSchema=z.object({decision:z.enum(['new_manual','update_exi
 export type Analysis=z.infer<typeof analysisSchema>;
 export type Clarification=z.infer<typeof analysisSchema>['question'];
 export type AnalysisSource={id:string;text:string;prompt?:string};
+export type IntakeAnswer={field:string;text:string;prompt?:string;unknown?:true};
+export function intakeSources(answers:IntakeAnswer[]):AnalysisSource[]{
+ return answers.flatMap((answer,index)=>answer.unknown?[]:[{
+  id:'intake:'+index,text:answer.text,...(answer.prompt?{prompt:answer.prompt}:{})
+ }]);
+}
 export const categoryLabels:Record<ConsultationType,string>={troubleshooting:'トラブル解決',procedure:'業務手続き',work_instruction:'作業方法',information_support:'情報・翻訳',unknown:'分類不明'};
 export type AdaptiveDetails={analysis:Analysis;question:Clarification;mode:'results'|'clarify'|'safety'|'handoff';safety?:{contact:string;instructions:string}};
 export const guidance:Record<ConsultationType,string>={
