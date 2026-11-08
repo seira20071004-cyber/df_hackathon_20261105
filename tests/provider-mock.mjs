@@ -60,6 +60,10 @@ globalThis.fetch = async (url,options) => {
     else {
       result=programFixture(input.context.question.includes('分岐'));result.title=input.extraction.title;const source=input.context.sources.find(source=>source.role==='manager').id;
       for(const block of result.blocks)block.sourceMessageIds=[source];
+      if(input.context.question==='交通費の社内FAQ'){
+        const answer=result.blocks.find(block=>block.type==='step');
+        result={...result,description:'通勤交通費の申請について',startBlockId:answer.id,blocks:[{...answer,title:'申請先',content:'人事部へ申請してください。',nextBlockId:null}]};
+      }
       if(input.context.question.includes('構造失敗'))result.blocks[0].nextBlockId='missing';
       if(input.context.question.includes('画像失敗'))result.blocks.find(block=>block.type==='step').content='画像失敗の手順';
     }

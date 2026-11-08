@@ -14,7 +14,13 @@ import {ManualAccessEditor} from './manual-access-editor';
 import type {ManualAccess} from '../lib/manual-access';
 import type {StaffRecipient} from '../lib/model';
 import {paperProgram,type ManualProgram} from '../lib/manual-graph';
+import {PendingDots} from './pending-dots';
 
+export function hasManualContent(manual:Manual){
+  return Boolean(manual.program||(manual.content.steps.length&&
+    !(manual.sourceQuestionIds.length&&manual.content.title==='保護済み会話の確認待ち'&&
+      manual.content.steps.length===1&&manual.content.steps[0]==='管理者による確認が必要')));
+}
 export function isGenerating(manual: Manual) {
   return Boolean(manual.generation && ['queued','analyzing','checking_gaps','writing','validating','illustrating'].includes(manual.generation.state) &&
     Date.now() - Date.parse(manual.generation.startedAt) < 300_000);
@@ -44,7 +50,7 @@ export function ManualView({manual, language, onEvent,contextText}: {manual: Man
     <span className="badge">A4 · 1枚</span>
     <button className="secondary" type="button" disabled={exporting} onClick={()=>download('pdf')}>↓ PDF</button>
     <button className="secondary" type="button" disabled={exporting} onClick={()=>download('jpeg')}>↓ JPEG</button>
-    {exporting && <span role="status">作成中…</span>}{exportError && <p role="alert">{exportError}</p>}
+    {exporting && <span role="status">作成中<PendingDots/></span>}{exportError && <p role="alert">{exportError}</p>}
   </div><article ref={documentRef} className="manual-document" aria-label={t('manuals')}>
     <div className="manual-meta"><span className="manual-site"><span aria-hidden="true">▥</span>{manual.siteId === 'sakura' ? 'さくらビル' : manual.siteId}</span>
       <span className={'badge '+(manual.status === 'published' ? 'resolved' : 'active')}>{manual.status === 'published' ? t('reviewed') : t('unreviewed')}</span></div>
@@ -128,14 +134,16 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
   const [editing,setEditing] = useState(false);
   const sources = questions.filter(question => manual.sourceQuestionIds.includes(question.id));
   const summary=manual.program?paperProgram(manual.program):manual.content;
+  const hasContent=hasManualContent(manual);
   const needsSource=manual.status==='draft'&&manual.generation?.error==='source-review-required';
   const stateLabel = needsSource?'生成前の確認待ち':generating ? state === 'illustrating' ? '任意の図解を生成中' : state==='validating' ? '品質と原文との一致を検証中' : state==='checking_gaps'?'重要な不足情報を確認中':state==='analyzing' ? '確定情報と訂正を抽出中' : 'ブロック構成を設計中' :
     manual.status==='published'?'確認済みのマニュアル':manual.reviewState==='awaiting_answers'?'管理者への追加質問があります':manual.reviewState==='rejected'?'却下したマニュアル':manual.reviewState==='archived'?'アーカイブ済み':manual.generation?.error==='safety-review'?'安全確認が必要なため保留':manual.reviewState==='held'?'保留中のマニュアル':state==='failed'?'生成内容の確認が必要です':'承認待ちのマニュアル';
   const activeStep=manual.reviewState==='awaiting_answers'?1:generating?(state==='analyzing'||state==='queued'?0:state==='checking_gaps'?1:state==='writing'?2:3):4;
   return <section className="panel flow review-panel">
-    <div className="split"><div><div className="eyebrow">MANUAL STUDIO</div><h2>{stateLabel}</h2></div>
+    <div className="split"><div><div className="eyebrow">MANUAL STUDIO</div><h2>{stateLabel}{generating&&<PendingDots/>}</h2></div>
       <span className={'badge ' + (manual.status === 'published' ? 'resolved' : 'active')}>{manual.status === 'published' ? '確認済' : '未確認'}</span></div>
-    {manual.status==='draft'&&!generating&&manual.reviewState!=='awaiting_answers'&&manual.access?.level!=='RESTRICTED'&&sources.length>0&&(needsSource||state==='failed'?<ProtectedSourceReview key={manual.updatedAt} manual={manual} busy={busy} ai={ai} onAction={sourceAction}/>:<details className="pipeline-report"><summary>保護済み会話を確認・再生成</summary><ProtectedSourceReview key={manual.updatedAt} manual={manual} busy={busy} ai={ai} onAction={sourceAction}/></details>)}
+    {manual.status==='draft'&&!generating&&!['awaiting_answers','rejected','archived'].includes(manual.reviewState??'')&&manual.access?.level!=='RESTRICTED'&&sources.length>0&&(needsSource||state==='failed'?<ProtectedSourceReview key={manual.updatedAt} manual={manual} busy={busy} ai={ai} onAction={sourceAction}/>:<details className="pipeline-report"><summary>保護済み会話を確認・再生成</summary><ProtectedSourceReview key={manual.updatedAt} manual={manual} busy={busy} ai={ai} onAction={sourceAction}/></details>)}
+    {needsSource&&<button type="button" className="secondary" disabled={busy} onClick={()=>changeState('reject')}>履歴のみ保存する（生成しない）</button>}
     {!needsSource&&<ManualAccessEditor key={manual.id+manual.updatedAt} manual={manual} staff={staff} busy={busy||generating} onSave={saveAccess}/>}
     {!needsSource&&<><div className="generation-track" role="status" aria-live="polite">
       {['会話を抽出','不足を確認','構成を設計','品質を検証','管理者が承認'].map((label,index) => <span key={label}
@@ -143,7 +151,7 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
         <b>{index + 1}</b>{label}
       </span>)}
     </div>
-    {state === 'failed' && <p className="notice">{errors[manual.generation?.error ?? 'provider-error'] ?? errors['provider-error']}</p>}
+    {(state==='failed'||state==='held')&&manual.generation?.error&&<p className="notice">{errors[manual.generation.error]??errors['provider-error']}</p>}
     {manual.publishedSnapshot&&!manual.publicationSuppressed&&<p className="notice">編集中の変更は未公開です。スタッフには承認済みの版 {manual.publishedSnapshot.revision??1} を表示しています。</p>}
     {manual.security&&<div className="notice"><strong>機密情報の検査</strong><p>{manual.security.inspection.provider==='google-dlp'?'Google Sensitive Data Protection':'ローカル簡易検査（検出は完全ではありません）'} · {manual.security.inspection.available?'検査済み':'検査を完了できませんでした・公開保留'}</p>
       {manual.security.inspection.findings.length>0&&<p>要確認：{manual.security.inspection.findings.map(finding=>`${finding.type} (${finding.count})`).join('、')}。実際の値は検査記録に残しません。</p>}</div>}
@@ -171,8 +179,8 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
     </details>}
     <div className="actions">
 
-      <button className="secondary" disabled={busy || generating || !ai} onClick={() => regenerate(true)}>▧ 図解を再生成</button>
-      <button className="link" disabled={generating} onClick={() => setEditing(!editing)} aria-expanded={editing}>{editing ? '編集を閉じる' : '編集する'}</button>
+      {hasContent&&manual.kind!=='faq'&&<button className="secondary" disabled={busy || generating || !ai} onClick={() => regenerate(true)}>▧ 図解を再生成</button>}
+      {(hasContent||manual.protectedSource?.approvedAt)&&<button className="link" disabled={generating} onClick={() => setEditing(!editing)} aria-expanded={editing}>{editing ? '編集を閉じる' : '編集する'}</button>}
       {manual.status==='published'?<button className="secondary" disabled={busy} onClick={()=>changeState('unpublish')}>非公開にする</button>:
         <button className="secondary" disabled={busy||manual.reviewState==='held'} onClick={()=>changeState('hold')}>保留にする</button>}
       {manual.reviewState!=='archived'&&<button className="link" disabled={busy||generating} onClick={()=>changeState('archive')}>アーカイブする</button>}
@@ -197,24 +205,25 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
         </div>
       </section>
       <section className="review-preview">
-        <h3 className="review-column-heading"><span aria-hidden="true">▤</span>作成されたマニュアル（プレビュー）</h3>
+        <h3 className="review-column-heading"><span aria-hidden="true">▤</span>{manual.kind==='faq'?'FAQのプレビュー':'マニュアルのプレビュー'}</h3>
         <div className="review-preview-body flow">
-          {generating&&!manual.program?<p role="status">会話から要約を作成しています。</p>:
+          {generating?<p role="status">会話からマニュアルを作成中<PendingDots/></p>:!hasContent?
+            <p className="muted">{manual.reviewState==='awaiting_answers'?'追加質問への回答を待っています。':'マニュアル本文はまだありません。保留理由と元の会話を確認してください。'}</p>:
             <article className="manual-document flow">
               <h4>{summary.title}</h4>
-              {summary.purpose&&summary.purpose!==summary.title&&<p>{summary.purpose}</p>}
-              <section aria-label="対処法の要約">
-                <h4>対処法</h4>
-                <ol className="manual-summary-steps">{summary.steps.map((step,index)=><li key={index}>{step}</li>)}</ol>
+              {summary.purpose&&summary.purpose!==summary.title&&<div>{manual.kind!=='faq'&&manual.consultationType&&<h4>{manual.consultationType==='troubleshooting'?'発生する問題':'作業目的'}</h4>}<p>{summary.purpose}</p></div>}
+              <section aria-label={manual.kind==='faq'?'回答':'対処法の要約'}>
+                <h4>{manual.kind==='faq'?'回答':'対処法'}</h4>
+                {manual.kind==='faq'?manual.content.steps.map((step,index)=><p key={index}>{step}</p>):<ol className="manual-summary-steps">{summary.steps.map((step,index)=><li key={index}>{step}</li>)}</ol>}
               </section>
               {summary.cautions.length>0&&<section><h4>注意事項</h4><ul>{summary.cautions.map((caution,index)=><li key={index}>{caution}</li>)}</ul></section>}
             </article>}
-          {!generating&&<details><summary>マニュアルを操作・ダウンロード</summary><ManualView manual={manual} language="ja"/></details>}
+          {!generating&&hasContent&&<details><summary>マニュアルを操作・ダウンロード</summary><ManualView manual={manual} language="ja"/></details>}
         </div>
       </section>
     </div>
     {!generating && (editing ? manual.program?<ProgramEditor key={'editor-'+manual.id+manual.updatedAt} manual={manual} busy={busy} onSave={saveProgram}/>:<ManualEditor key={'legacy-editor-'+manual.id + manual.updatedAt} manual={manual} busy={busy} save={save}/> :
-      <ReviewApproval key={'approval-'+manual.id+manual.updatedAt} manual={manual} busy={busy} onEdit={()=>setEditing(true)} save={save} saveProgram={saveProgram}/>)}
+      hasContent&&<ReviewApproval key={'approval-'+manual.id+manual.updatedAt} manual={manual} busy={busy} onEdit={()=>setEditing(true)} save={save} saveProgram={saveProgram}/>)}
     </>}
     {Boolean(manual.audit?.length)&&<details className="pipeline-report"><summary>編集・承認履歴</summary><ul>{[...manual.audit!].reverse().map((entry,index)=><li key={index}>v{entry.revision} · {new Date(entry.at).toLocaleString('ja-JP')} · {entry.actor} · {entry.action} · {entry.changes.join('、')}</li>)}</ul></details>}
   </section>;

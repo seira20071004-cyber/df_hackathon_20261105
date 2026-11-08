@@ -92,15 +92,34 @@ export function programEvidenceIssues(program:ManualProgram,extracted:ExtractedC
   }return issues;
 }
 export interface GenerationResult {state:'ready'|'awaiting_answers'|'held';extraction:ExtractedChat;questions:GapQuestion[];program?:ManualProgram;report?:QualityReport;issues:string[];repairs:number;}
-export async function runInteractiveGeneration({context,call,round,previousQuestions=[],answers=[],consultationType='unknown',onStage=async()=>undefined}: {
-  context:Context;call:AiCall;round:number;consultationType?:ConsultationType;previousQuestions?:GapQuestion[];answers?:AdditionalAnswer[];onStage?:(stage:Stage)=>Promise<void>;
+export async function runInteractiveGeneration({context,call,round,previousQuestions=[],answers=[],consultationType='unknown',route,onStage=async()=>undefined}: {
+  context:Context;call:AiCall;round:number;consultationType?:ConsultationType;route?:'rules'|'work';previousQuestions?:GapQuestion[];answers?:AdditionalAnswer[];onStage?:(stage:Stage)=>Promise<void>;
 }):Promise<GenerationResult>{
   const deadline=Date.now()+240_000;
   async function ask<T>(schema:z.ZodType<T>,instruction:string,data:unknown,model?:string){const remaining=deadline-Date.now();if(remaining<1000)throw new Error('generation-timeout');
     return schema.parse(await call(schema,instruction,data,{timeoutMs:Math.min(30000,remaining),...(model?{model}:{})}));}
-  await onStage('analyzing');const extracted=await ask(extractedChatSchema,interactivePrompts.extract,context);
+  const extractionFocus=route==='rules'
+    ? '\nFAQ向けに、質問と社内ルールの回答を抽出します。管理者が明言した回答の本文をaction、適用条件をscopeまたはcondition、例外をexclusionとして引用付きで記録します。'
+    : route==='work'
+      ? '\n業務用です。トラブル解決型は症状・発生条件・対処・解決基準、操作手順型は作業目的・明示された準備・操作・完了条件に重点を置きます。'
+      : '';
+  await onStage('analyzing');const extracted=await ask(extractedChatSchema,interactivePrompts.extract+extractionFocus,context);
   const invalid=extractionIssues(extracted,context);if(invalid.length)return {state:'held',extraction:extracted,questions:[],issues:invalid,repairs:0};
-  await onStage('checking_gaps');const gaps=await ask(gapSchema,interactivePrompts.gaps,{context,extraction:extracted,previousQuestions,answers:answers.map(({id,questionId,question,answer,round})=>({id,questionId,question,answer,round}))});
+  if(route==='work'&&consultationType==='unknown'){
+    await onStage('checking_gaps');
+    if(round>=MAX_QUESTION_ROUNDS||previousQuestions.some(question=>question.id==='work-manual-kind'))
+      return {state:'held',extraction:extracted,questions:[],issues:['マニュアルの種類を確定できませんでした'],repairs:0};
+    return {state:'awaiting_answers',extraction:extracted,questions:[{
+      id:'work-manual-kind',question:'「トラブル解決型」または「操作手順型」のどちらかを入力してください。',
+      reason:'不具合への対応と通常の作業手順を区別するためです。',sourceMessageIds:context.sources.slice(0,1).map(source=>source.id),
+    }],issues:[],repairs:0};
+  }
+  const format=route==='rules'
+    ? '社内ルールのFAQです。質問をタイトル、回答を単一の説明STEPにし、明示された条件・例外は同じ説明に含めます。会社の規定・金額・期限を創作しません。未確認の条件はunknownsに残し、正確な回答に必要な場合は追加質問します。'
+    : route==='work'
+      ? '業務マニュアルです。不具合への対応（トラブル解決型）か作業のやり方（操作手順型）を見分けます。種類が曖昧なら管理者に確認します。前者は症状から、後者は作業目的と確認できた事前準備から始め、手順、完了確認、注意を根拠に応じて並べます。'
+      : '';
+  await onStage('checking_gaps');const gaps=await ask(gapSchema,interactivePrompts.gaps+'\n'+format,{context,extraction:extracted,previousQuestions,answers:answers.map(({id,questionId,question,answer,round})=>({id,questionId,question,answer,round}))});
   if(gaps.hold)return {state:'held',extraction:extracted,questions:[],issues:['管理者による確認が必要です'],repairs:0};
   if(!gaps.ready||gaps.questions.length){
     const normalize=(value:string)=>value.normalize('NFKC').replace(/\s/g,'');
@@ -114,9 +133,11 @@ export async function runInteractiveGeneration({context,call,round,previousQuest
   if(!extracted.facts.some(fact=>fact.status==='current'&&['action','scope','warning'].includes(fact.kind)))return {state:'held',extraction:extracted,questions:[],issues:['対処法の確定情報がありません'],repairs:0};
   let candidate:ManualProgram|undefined,report:QualityReport|undefined,issues:string[]=[];
   for(let repair=0;repair<=MAX_REPAIRS;repair++){
-    await onStage('writing');candidate=await ask(programSchema,interactivePrompts.design+'\n分類に応じた構成指針（根拠がなければ追加しない）：'+guidance[consultationType]+' STEPのpresentationはinstruction・checklist・explanation・approvalから必要に応じて選ぶ。approvalは承認が必要という説明であり、承認操作ではない。',{context,extraction:extracted,...(candidate?{previousCandidate:candidate,errors:issues,...(report?{quality:report}:{})}:{})});
+    await onStage('writing');candidate=await ask(programSchema,interactivePrompts.design+'\n'+format+'\n分類に応じた構成指針（根拠がなければ追加しない）：'+guidance[consultationType]+' STEPのpresentationはinstruction・checklist・explanation・approvalから必要に応じて選ぶ。approvalは承認が必要という説明であり、承認操作ではない。',{context,extraction:extracted,...(candidate?{previousCandidate:candidate,errors:issues,...(report?{quality:report}:{})}:{})});
     issues=[...graphIssues(candidate),...programEvidenceIssues(candidate,extracted,context),...(candidate.language!=='ja'?['原文マニュアルは日本語で作成してください']:[])];
-    if(!issues.length){await onStage('validating');report=await ask(qualitySchema,interactivePrompts.verify,{context,extraction:extracted,candidate,errors:issues},process.env.GEMINI_REVIEW_MODEL);issues=qualityIssues(candidate,report);}
+    if(route==='rules'&&(candidate.blocks.filter(block=>block.type==='step').length!==1||
+      candidate.blocks.some(block=>block.type==='branch'||block.type==='check')))issues.push('FAQは回答を1つにまとめ、分岐や解決確認を含めないでください');
+    if(!issues.length){await onStage('validating');report=await ask(qualitySchema,interactivePrompts.verify+(route==='rules'?'\nFAQの回答について、社内ルール、金額、期限、条件、例外が根拠と一致するかを必ず照合します。':''),{context,extraction:extracted,candidate,errors:issues},process.env.GEMINI_REVIEW_MODEL);issues=qualityIssues(candidate,report);}
     if(!issues.length)return {state:'ready',extraction:extracted,program:candidate,report,questions:[],issues:[],repairs:repair};
   }
   return {state:'held',extraction:extracted,questions:[],...(report?{report}:{}),issues,repairs:MAX_REPAIRS};

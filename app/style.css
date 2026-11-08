@@ -32,6 +32,20 @@ ul { padding-left:1.35rem; list-style:disc; }
 .muted,.empty { color:var(--muted); }
 .empty { padding:16px; background:var(--surface); border-radius:12px; }
 .notice,.alert,.busy { padding:11px 14px; border-radius:11px; background:#eef4ff; overflow-wrap:anywhere; }
+.pending-dots { display:inline-flex; gap:.1em; margin-inline-start:.22em; }
+.routing-card { display:grid; grid-template-columns:2rem minmax(0,1fr) auto; text-align:start; gap:12px; width:100%; min-height:76px; background:#f4f8fe; border-color:#bfd1e7; color:#102b47; }
+.routing-card strong,.routing-card small { display:block; }
+.routing-card>span:first-child { font-size:1.45rem; }
+.routing-urgent { background:#fff0f0; border-color:#e9a3a3; color:#981f27; }
+.routing-category,.routing-rules { background:#ebf9f3; border-color:#a7d5c0; color:#145e48; }
+.emergency-call { font-weight:750; text-decoration:underline; }
+.urgent-badge { background:#ffe5e5; color:#961d26; }
+.case-badges { display:grid; gap:3px; justify-items:end; }
+.pending-dots>span { animation:pending-dot 1.2s ease-in-out infinite; }
+.pending-dots>span:nth-child(2) { animation-delay:.15s; }
+.pending-dots>span:nth-child(3) { animation-delay:.3s; }
+@keyframes pending-dot { 0%,65%,100% { opacity:.45; transform:translateY(0); } 30% { opacity:1; transform:translateY(-.25em); } }
+@media (prefers-reduced-motion:reduce) { .pending-dots>span { animation:none; } }
 .alert { color:#8f1833; background:#fff1f4; }
 .badge { display:inline-flex; align-items:center; max-width:100%; padding:4px 9px; background:#eff4fd; color:#274e93; border-radius:999px; font-size:.75rem; font-weight:750; }
 .badge.demo,.badge.active { background:#fff3d9; color:#784b00; }
@@ -382,7 +396,7 @@ footer { color:var(--muted); font-size:.8rem; text-align:center; padding:8px; }
 .intake-turn .bubble{width:fit-content}
 .chat-screen>.chat-resolve{order:1}
 .chat-composer{order:2;display:flex;align-items:center;gap:8px;background:white;padding:10px 14px;border-top:1px solid var(--line)}
-.chat-composer input{min-width:0;flex:1}
+.chat-composer textarea{min-width:0;flex:1}
 .chat-composer .chat-send{border-radius:50%;min-width:44px;min-height:44px;padding:0;font-size:1.2rem}
 @media(max-width:720px){.workspace-content{padding-bottom:calc(86px + env(safe-area-inset-bottom))}.chat-screen>.messages{flex:1}.chat-screen{display:flex;flex-direction:column}}
 @media print{.staff-bottom{display:none!important}}

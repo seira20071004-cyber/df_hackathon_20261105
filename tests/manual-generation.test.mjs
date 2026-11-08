@@ -30,6 +30,10 @@ test('SDK pipeline, supplements, approval, sessions and escalation remain scoped
  assert.deepEqual((await api('sato',chatRequest)).translations,[{id:'opening',text:'スキャナーが止まっています。'},{id:'bilingual-reply',text:'ランプを確認してください。'}]);
  assert.deepEqual((await api('alex',{...chatRequest,messageIds:['opening'],language:'en'})).translations,[{id:'opening',text:null}]);
  await api('linh',chatRequest,404);
+ const previewRequest={action:'consultationPreviews',questionIds:['bilingual-chat-test'],language:'ja'};
+ assert.deepEqual((await api('sato',previewRequest)).translations,[{id:'bilingual-chat-test',text:'スキャナーが止まっています。'}]);
+ assert.deepEqual((await api('alex',{...previewRequest,language:'en'})).translations,[{id:'bilingual-chat-test',text:'The scanner is stuck.'}]);
+ await api('linh',previewRequest,404);
  async function approve(id,answerCount=0){
   let row;for(let i=0;i<100;i++){row=(await api('sato')).manuals.find(item=>item.id===id);if(row?.protectedSource?.context?.sources.filter(source=>source.role==='manager_supplement').length===answerCount)break;await new Promise(resolve=>setTimeout(resolve,100));}
   assert.equal(row.generation.state,'held');assert.equal(row.pipeline?.verification==='passed',false);
@@ -41,6 +45,38 @@ test('SDK pipeline, supplements, approval, sessions and escalation remain scoped
   const before=Date.now();await api('linh',{action:'resolve',id});assert.ok(Date.now()-before<2000,'Resolution must not wait for Gemini');await api('linh',{action:'resolve',id});
   const matches=(await api('sato')).manuals.filter(manual=>manual.sourceQuestionIds.includes(id));assert.equal(matches.length,1);assert.equal(matches[0].program,undefined);await approve(matches[0].id);return {id,manual:matches[0]};}
  async function completed(id){let manual;for(let i=0;i<150;i++){manual=(await api('sato')).manuals.find(row=>row.id===id);if(['ready','failed','held','awaiting_answers'].includes(manual.generation?.state))return manual;await new Promise(resolve=>setTimeout(resolve,100));}assert.fail(JSON.stringify(manual)+'\n'+log);}
+ const urgentId=randomUUID();
+ assert.deepEqual(await api('linh',{action:'emergencyContact'}),{contact:'',instructions:''});
+ await api('linh',{action:'ask',route:'urgent',id:urgentId,text:'緊急の連絡です。',language:'ja'});
+ assert.equal((await api('sato')).questions.find(row=>row.id===urgentId).route,'urgent');
+ await api('linh',{action:'resolve',id:urgentId});
+ assert.equal((await api('sato')).manuals.some(row=>row.sourceQuestionIds.includes(urgentId)),false);
+ const faqId=randomUUID(),faqTitle='交通費の社内FAQ';
+ await api('linh',{action:'ask',route:'rules',id:faqId,text:faqTitle,language:'ja'});
+ await api('sato',{action:'reply',id:faqId,messageId:randomUUID(),text:'人事部へ申請してください。'});
+ await api('linh',{action:'resolve',id:faqId});
+ const faqDraft=(await api('sato')).manuals.find(row=>row.sourceQuestionIds.includes(faqId));
+ assert.equal(faqDraft.kind,'faq');
+ assert.deepEqual((await api('alex',{action:'search',route:'rules',text:faqTitle,language:'ja'})).matches,[]);
+ await approve(faqDraft.id);
+ const faq=await completed(faqDraft.id);
+ assert.equal(faq.generation.state,'ready');
+ assert.match(faq.content.steps[0],/人事部へ申請/);
+ await api('sato',{action:'saveProgram',id:faq.id,version:faq.updatedAt,program:faq.program,publish:true,confirmPermissions:true});
+ assert.ok((await api('alex',{action:'search',route:'rules',text:faqTitle,language:'ja'})).matches.some(row=>row.id===faq.id));
+ assert.equal((await api('alex',{action:'search',text:faqTitle,language:'ja'})).matches.some(row=>row.id===faq.id),false);
+ const rejectedId=randomUUID();
+ await api('linh',{action:'ask',route:'work',id:rejectedId,text:'業務相談を履歴だけに残す',language:'ja'});
+ await api('linh',{action:'resolve',id:rejectedId});
+ let rejected;
+ for(let i=0;i<100;i++){
+   rejected=(await api('sato')).manuals.find(row=>row.sourceQuestionIds.includes(rejectedId));
+   if(rejected?.protectedSource)break;
+   await new Promise(resolve=>setTimeout(resolve,100));
+ }
+ rejected=await api('sato',{action:'manualState',id:rejected.id,version:rejected.updatedAt,mode:'reject'});
+ assert.equal(rejected.reviewState,'rejected');
+ await api('sato',{action:'approveSource',id:rejected.id,version:rejected.updatedAt,confirmed:true},409);
  const pdf=await readFile(join(root,'public','sample-work-manual.pdf'));
  const upload={action:'uploadPdf',filename:'sample.pdf',data:pdf.toString('base64'),classification:'internal',share:true};
  await api('linh',upload,403);await api('sato',{...upload,data:Buffer.from('not a pdf').toString('base64')},400);

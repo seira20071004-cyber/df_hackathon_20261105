@@ -26,6 +26,7 @@ export interface Message {
 }
 export interface Question {
   id: string;
+  route?: 'rules'|'work'|'urgent';
   organizationId: string;
   siteId: string;
   consultation?:import('./adaptive').Analysis;
@@ -58,6 +59,7 @@ export interface ManualContent {
   checks: string[];
 }
 export interface Manual {
+  kind?: 'faq';
   access?:import('./manual-access').ManualAccess;
   confidentiality?:import('./manual-access').ManualAccess['level'];
   id: string;

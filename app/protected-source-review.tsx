@@ -7,6 +7,7 @@ export function ProtectedSourceReview({manual,busy,ai,onAction}:{manual:Manual;b
  const source=manual.protectedSource,context=source?.context;
  const rows=context?[...context.sources,...(context.resolutionNote?[{role:'employee',text:context.resolutionNote}]:[])]:[];
  return <section className="panel flow source-review"><h3>生成前の機密情報確認</h3>
+  <p>{manual.kind==='faq'?'保護済みの会話を確認して承認すると、相談に基づく質問と回答の作成が始まります。':'保護済みの会話を確認して承認すると、相談に基づくタイトルと対処法の作成が始まります。'}</p>
   {source?.error?<p role="alert">{source.error==='sensitive-input-blocked'?'送信禁止の情報を検出したため、Gemini への送信を停止しています。':'保護処理が完了していません。検査設定を確認して再試行してください。'}</p>:null}
   {context?<><p>{source?.inspection?.provider==='google-dlp'?'Google Sensitive Data Protection':'ローカル簡易検査'}で保護したコピーです。原文は変更されません。伏せたい箇所はテキストを選択してください。</p>
    <div className="messages">{rows.map((row,index)=>row.role==='system'?null:<div key={index} className={'bubble '+(row.role.startsWith('manager')?'own':'')}>
@@ -15,7 +16,7 @@ export function ProtectedSourceReview({manual,busy,ai,onAction}:{manual:Manual;b
    <button className="secondary" disabled={busy||!selection} onClick={()=>selection&&onAction({action:'hideSource',...selection})}>選択箇所を機密情報として隠す</button>
    {source?.approvedAt&&<p className="notice">このコピーは確認済みです。再生成する場合も以下を確認してください。</p>}
    <label className="check"><input type="checkbox" checked={confirmed} onChange={event=>setConfirmed(event.target.checked)}/>機密情報が残っていないことを確認しました</label>
-   <button disabled={busy||!confirmed||!ai} onClick={()=>onAction({action:'approveSource',confirmed:true})}>マニュアルを作成</button>
+   <button disabled={busy||!confirmed||!ai} onClick={()=>onAction({action:'approveSource',confirmed:true})}>{manual.kind==='faq'?'履歴を承認してFAQ案を作成':'履歴を承認してマニュアル案を作成'}</button>
    {!ai&&<p className="muted">生成サービスは未設定です。保護済みコピーは確認できます。</p>}
   </>:<button className="secondary" disabled={busy} onClick={()=>onAction({action:'prepareSource'})}>保護済みコピーを準備する</button>}
  </section>;
