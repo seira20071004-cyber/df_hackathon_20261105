@@ -44,8 +44,8 @@ export function OrganizationEntry({config,demo,language,busy,run,enter,submit}:P
   {demo?<><p className="notice">試用モードではサンプル組織を利用します。</p>
    {mode==='join'?<form className="flow" onSubmit={event=>{
     event.preventDefault();
-    run(async()=>{if(invitation.trim().toUpperCase()!=='DEMO2026')throw new Error('invalid-invite');await enter('linh');});
-   }}><label>招待コード<input value={invitation} onChange={event=>setInvitation(event.target.value)} placeholder="DEMO2026" required autoCapitalize="characters" autoComplete="off"/></label>
+    run(async()=>{if(invitation.trim()!=='123456')throw new Error('invalid-invite');await enter('linh');});
+   }}><label>招待コード<input value={invitation} onChange={event=>setInvitation(event.target.value)} placeholder="123456" required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="off"/></label>
    <button disabled={busy}>デモ組織に参加する</button></form>:<button disabled={busy} onClick={()=>run(()=>enter('sato'))}>管理者デモを開く</button>}</>
   :!config?<p className="notice">この環境ではGoogleログインが未設定です。</p>
   :!token?<button className="secondary google-login" disabled={busy} onClick={()=>run(connect)}><span aria-hidden="true">G</span> Google でログイン</button>
@@ -57,7 +57,7 @@ export function OrganizationEntry({config,demo,language,busy,run,enter,submit}:P
     await submit(credential,mode==='create'?{action:'create',name:value,language}:{action:'join',code:value,language});
     await enter(credential,true);
    });
-  }}><label>{mode==='create'?'組織名':'招待コード'}<input name="value" required minLength={mode==='create'?2:24} maxLength={mode==='create'?100:24} autoComplete="off" autoCapitalize={mode==='join'?'characters':'none'}/></label>
+  }}><label>{mode==='create'?'組織名':'招待コード'}<input name="value" required minLength={mode==='create'?2:6} maxLength={mode==='create'?100:24} inputMode={mode==='join'?'numeric':undefined} pattern={mode==='join'?'(?:[0-9]{6}|[A-Fa-f0-9]{24})':undefined} autoComplete={mode==='join'?'one-time-code':'off'}/></label>
   <button disabled={busy}>{mode==='create'?'作成する':'参加する'}</button></form>}
  </div>;
 }

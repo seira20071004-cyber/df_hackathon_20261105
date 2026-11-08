@@ -4,9 +4,9 @@ import {copy} from '../lib/copy';
 import {languageNames,languages,type Language,type Profile} from '../lib/model';
 
 export type AppTab='home'|'cases'|'manuals'|'members'|'settings';
-const labels={ja:{navigation:'画面切り替え',members:'メンバー',settings:'設定',management:'管理画面',account:'アカウント情報',name:'氏名',company:'会社名',role:'立場',unset:'未登録',site:'現場',language:'表示言語'},
-  en:{navigation:'Navigation',members:'Members',settings:'Settings',management:'Management',account:'Account information',name:'Name',company:'Company',role:'Role',unset:'Not provided',site:'Site',language:'Display language'},
-  vi:{navigation:'Điều hướng',members:'Thành viên',settings:'Cài đặt',management:'Quản lý',account:'Thông tin tài khoản',name:'Họ tên',company:'Công ty',role:'Vai trò',unset:'Chưa đăng ký',site:'Địa điểm',language:'Ngôn ngữ hiển thị'}};
+const labels={ja:{navigation:'画面切り替え',members:'メンバー',settings:'設定',consultations:'相談',account:'アカウント情報',name:'氏名',company:'会社名',role:'立場',unset:'未登録',site:'現場',language:'表示言語'},
+  en:{navigation:'Navigation',members:'Members',settings:'Settings',consultations:'Consultations',account:'Account information',name:'Name',company:'Company',role:'Role',unset:'Not provided',site:'Site',language:'Display language'},
+  vi:{navigation:'Điều hướng',members:'Thành viên',settings:'Cài đặt',consultations:'Trao đổi',account:'Thông tin tài khoản',name:'Họ tên',company:'Công ty',role:'Vai trò',unset:'Chưa đăng ký',site:'Địa điểm',language:'Ngôn ngữ hiển thị'}};
 function Icon({name}:{name:'settings'|'home'|'cases'|'manuals'|'person'|'members'}) {
   return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     {name==='members'?<><circle cx="9" cy="8" r="3"/><path d="M2 20v-2a7 7 0 0 1 14 0v2M16 5a3 3 0 0 1 0 6m2 3a5 5 0 0 1 4 5v1"/></>:name==='settings'?<><path d="m9 3-.8 2.3-2.4.4-1.5 2.6 1.1 2.2L4 12.5l1.3 2.6 2.4.4.8 2.3h3l.8-2.3 2.4-.4 1.3-2.6-1.4-2 1.1-2.2-1.5-2.6-2.4-.4L12 3Z" transform="translate(2 1)"/><circle cx="12" cy="11.5" r="2.5"/></>:name==='home'?<><path d="m3 10 9-7 9 7v10H3Z"/><path d="M9 20v-7h6v7"/></>:name==='cases'?<path d="M4 4h16v12H9l-5 4V4ZM8 8h8M8 12h5"/>:name==='manuals'?<><path d="M4 4h16v17H4zM8 4v17M11 8h6M11 12h6"/></>:<><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></>}
@@ -25,8 +25,8 @@ export function WorkspaceShell({profile,language,tab,unread,demo,onNavigate,onSi
   const accountButton=useRef<HTMLButtonElement>(null),popover=useRef<HTMLDivElement>(null);
   const text=labels[language],t=(key:Parameters<typeof copy>[1])=>copy(language,key);
   const name=(item:AppTab)=>item==='settings'?text.settings:item==='members'?text.members:
-    item==='home'&&profile.role==='manager'?text.management:t(item);
-  const tabs=profile.role==='manager'?(['home','cases','manuals','members'] as const):(['home','cases','manuals'] as const);
+    item==='cases'&&profile.role==='manager'?text.consultations:t(item);
+  const tabs=profile.role==='manager'?(['cases','manuals','members'] as const):(['home','cases','manuals'] as const);
   function navigate(next:AppTab){setAccount(false);onNavigate(next);}
   useEffect(()=>{
     if(!account)return;
@@ -53,7 +53,7 @@ export function WorkspaceShell({profile,language,tab,unread,demo,onNavigate,onSi
         </div>}
       </div></div></header>
     <main className={'content flow workspace-content '+(profile.role==='employee'?'staff-workspace':'manager-workspace')}>{children}</main>
-    <nav className={'staff-bottom '+(profile.role==='manager'?'manager-bottom':'')} aria-label={text.navigation}>
+    <nav className="staff-bottom" aria-label={text.navigation}>
       {tabs.map(item=><button key={item} type="button" aria-current={tab===item?'page':undefined} onClick={()=>navigate(item)}>
         <Icon name={item}/>{name(item)}{item==='manuals'&&unread>0&&<span className="notification-count">{unread}</span>}
       </button>)}

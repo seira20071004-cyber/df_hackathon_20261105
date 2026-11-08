@@ -71,6 +71,8 @@ nav { display:grid; gap:5px; }
 .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
 .stat { justify-content:space-between; color:var(--ink); text-align:left; }
 .stat strong { font-size:1.8rem; }
+.stat[aria-pressed="true"] { background:#1745df; border-color:#1745df; color:white; }
+.stat[aria-pressed="true"] .badge { background:white; color:#173fae; }
 .messages { display:grid; gap:9px; }
 .bubble { justify-self:start; max-width:90%; padding:10px 14px; border-radius:14px; background:#eef3fa; overflow-wrap:anywhere; }
 .bubble.own { justify-self:end; background:#e8f0ff; }
@@ -358,7 +360,6 @@ footer { color:var(--muted); font-size:.8rem; text-align:center; padding:8px; }
 
 .workspace-content{padding-bottom:calc(88px + env(safe-area-inset-bottom))}
 .staff-bottom{position:fixed;inset:auto 0 0;z-index:15;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:6px max(8px,calc((100vw - 740px)/2)) calc(6px + env(safe-area-inset-bottom));background:#fff;border-top:1px solid #dde6f3}
-.staff-bottom.manager-bottom{grid-template-columns:repeat(4,minmax(0,1fr))}
 .staff-bottom button{position:relative;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:3px;min-height:48px;background:#fff;color:#425571;font-size:.75rem;padding:4px;white-space:nowrap}
 .staff-bottom button[aria-current="page"]{background:#eaf1ff;color:#173fae}
 .staff-bottom .notification-count{position:absolute;top:2px;left:calc(50% + 10px)}

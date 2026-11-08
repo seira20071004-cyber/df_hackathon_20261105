@@ -6,7 +6,7 @@ import {photoIntakeEnabled} from '../../../lib/consultation';
 import {documentDownload} from '../../../lib/documents';
 import {authenticate,isDemo,slug} from '../../../lib/storage';
 import {actionSchema,ApiError,execute,workspace} from '../../../lib/workflow';
-import {audit,loginLimit,requestLimit,SecurityError,securityContext} from '../../../lib/security-runtime';
+import {audit,inviteAttemptLimit,loginLimit,requestLimit,SecurityError,securityContext} from '../../../lib/security-runtime';
 import type {Profile} from '../../../lib/model';
 import {googleIdentity,onboard,onboardingSchema,inviteSchema,issueInvitation} from '../../../lib/organization';
 import {publicGoogleAuth,publicAppCheckConfig} from '../../../lib/app-check-config';
@@ -51,6 +51,7 @@ async function run(request:NextRequest){
    operation='organization_onboarding';if(!publicGoogleAuth(process.env))throw new SecurityError(503,'firebase-unconfigured');
    await loginLimit();const identity=await googleIdentity(header.slice(7));
    const input=onboardingSchema.safeParse(await readJson(request,8000));if(!input.success)throw new SecurityError(400,'invalid-input');
+   if(input.data.action==='join')await inviteAttemptLimit(identity.uid);
    const result=await onboard(identity,input.data);await audit({actorId:identity.uid,action:operation,result:'success'});return reply(result);
   }
   profile=await authenticate(header.slice(7),request.headers.get('X-Bridge-Organization')??undefined);if(!profile)throw new SecurityError(401,'login-required');

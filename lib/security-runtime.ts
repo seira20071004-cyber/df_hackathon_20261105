@@ -29,6 +29,9 @@ export async function requestLimit(profile:Profile){
  await atomic('org:'+profile.organizationId,state=>({state:reserve(state,limit('BRIDGE_ORG_REQUESTS_PER_MINUTE',900),0,null),result:true}));
 }
 export async function loginLimit(){await atomic('login-global',state=>({state:reserve(state,20,0,null),result:true}));}
+export async function inviteAttemptLimit(uid:string){
+ await atomic('invite-join:'+uid,state=>({state:reserve(state,5,0,null),result:true}));
+}
 export async function withAiLimit<T>(work:()=>Promise<T>){
  const profile=securityContext.getStore();if(!profile){if(process.env.BRIDGE_DEMO==='true')return work();throw new SecurityError(503,'ai-context-required');}
  const key='ai:'+profile.organizationId,id=randomUUID();

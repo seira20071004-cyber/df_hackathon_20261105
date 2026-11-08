@@ -1,4 +1,4 @@
-import {createHash,randomBytes,randomUUID} from 'node:crypto';
+import {createHash,randomInt,randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import {getAuth,type DecodedIdToken} from 'firebase-admin/auth';
 import {getFirestore} from 'firebase-admin/firestore';
@@ -8,9 +8,9 @@ import {languages,type Profile} from './model';
 
 export const onboardingSchema=z.discriminatedUnion('action',[
  z.object({action:z.literal('create'),name:z.string().trim().min(2).max(100),language:z.enum(languages)}).strict(),
- z.object({action:z.literal('join'),code:z.string().trim().regex(/^[A-Fa-f0-9]{24}$/),language:z.enum(languages)}).strict()
+ z.object({action:z.literal('join'),code:z.string().trim().regex(/^(?:[0-9]{6}|[A-Fa-f0-9]{24})$/),language:z.enum(languages)}).strict()
 ]);
-export const inviteSchema=z.object({hours:z.number().int().min(1).max(168),uses:z.number().int().min(1).max(50),siteId:slug}).strict();
+export const inviteSchema=z.object({hours:z.literal(24).optional(),uses:z.number().int().min(1).max(50),siteId:slug}).strict();
 const digest=(code:string)=>createHash('sha256').update(code.toUpperCase()).digest('hex');
 export async function googleIdentity(token:string){
  const user=await getAuth(bridgeAdmin()).verifyIdToken(token,true).catch(()=>null);
@@ -42,12 +42,21 @@ export async function onboard(user:DecodedIdToken,input:z.infer<typeof onboardin
 }
 export async function issueInvitation(profile:Profile,input:z.infer<typeof inviteSchema>){
  if(profile.role!=='manager'||!profile.siteIds.includes(input.siteId))throw new SecurityError(403,'forbidden');
- const db=getFirestore(bridgeAdmin()),code=randomBytes(12).toString('hex').toUpperCase(),expiresAt=new Date(Date.now()+input.hours*3600_000);
- const org=db.collection('organizations').doc(profile.organizationId),invite=db.collection('_bridgeInvitations').doc(digest(code));
- await db.runTransaction(async tx=>{
-  const [orgDoc,siteDoc]=await tx.getAll(org,org.collection('sites').doc(input.siteId));
+ const db=getFirestore(bridgeAdmin());
+ const org=db.collection('organizations').doc(profile.organizationId);
+ const site=org.collection('sites').doc(input.siteId);
+ const invitations=db.collection('_bridgeInvitations');
+ const codes=new Set<string>();
+ while(codes.size<8)codes.add(String(randomInt(1_000_000)).padStart(6,'0'));
+ const candidates=[...codes].map(code=>({code,ref:invitations.doc(digest(code))}));
+ return db.runTransaction(async tx=>{
+  const [orgDoc,siteDoc,...existing]=await tx.getAll(org,site,...candidates.map(candidate=>candidate.ref));
   if(!orgDoc.exists||!siteDoc.exists)throw new SecurityError(409,'organization-not-configured');
-  tx.create(invite,{organizationId:profile.organizationId,siteId:input.siteId,remaining:input.uses,expiresAt,createdBy:profile.id});
+  const free=existing.findIndex(doc=>!doc.exists);
+  if(free<0)throw new SecurityError(503,'invite-code-unavailable');
+  const {code,ref}=candidates[free];
+  const expiresAt=new Date(Date.now()+24*3600_000);
+  tx.create(ref,{organizationId:profile.organizationId,siteId:input.siteId,remaining:input.uses,expiresAt,createdBy:profile.id});
+  return {code,expiresAt:expiresAt.toISOString()};
  });
- return {code,expiresAt:expiresAt.toISOString()};
 }

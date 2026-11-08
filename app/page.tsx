@@ -60,7 +60,7 @@ export default function BridgeWork() {
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState('');
   const [reuseConfirmed,setReuseConfirmed] = useState(false);
-  const [statusFilter,setStatusFilter] = useState('all');
+  const [statusFilter,setStatusFilter] = useState<Question['status']>('new');
   const [voiceSupported,setVoiceSupported] = useState(false);
   const [listening,setListening] = useState(false);
   const t = (key: Parameters<typeof copy>[1]) => copy(language,key);
@@ -86,6 +86,7 @@ export default function BridgeWork() {
     const cached = localStorage.getItem('bridge-language-' + next.profile.id);
     setLanguage(languages.find(code => code === cached) ?? next.profile.preferredLanguage);
     setSite(next.profile.siteIds[0]);
+    setTab(next.profile.role==='manager'?'cases':'home');
     const session=google?GOOGLE_SESSION:auth;
     sessionStorage.setItem('bridge-token',session);
     setToken(session);
@@ -127,7 +128,7 @@ export default function BridgeWork() {
     setPhoto(undefined);setInvite(undefined);setManualFilter('');setChatTranslations({});setIntake([]);setConsultOpen(false);
     if(googleAuth)void signOutGoogle().catch(()=>undefined);
     sessionStorage.removeItem('bridge-token');setToken('');setData(undefined);setLanguage('ja');setQuery('');setResults(undefined);setSelected('');
-    setManualId('');setMessage('');setReuseConfirmed(false);setError('');setTab('home');setStatusFilter('all');
+    setManualId('');setMessage('');setReuseConfirmed(false);setError('');setTab('home');setStatusFilter('new');
   }
   function openCase(id: string) {
     changeTab('cases');setSelected(id); setMessage(''); setReuseConfirmed(false);
@@ -156,7 +157,8 @@ export default function BridgeWork() {
     catch {setError('voice-error');}
   }
   const manager = data?.profile.role === 'manager';
-  const questions = data?.questions.filter(row => row.siteId === site) ?? [];
+  const questions = (data?.questions.filter(row => row.siteId === site) ?? [])
+    .sort((a,b)=>Date.parse(b.createdAt)-Date.parse(a.createdAt)||b.id.localeCompare(a.id));
   const manuals = data?.manuals.filter(row => row.siteId === site) ?? [];
   const question = questions.find(row => row.id === selected);
   const manual = manuals.find(row => row.id === manualId);
@@ -248,7 +250,7 @@ export default function BridgeWork() {
         {data.aiFixtures&&<p className="notice" role="status">{{ja:'架空のデモ · AIは模擬応答です',en:'Fictional demo · Simulated AI responses',vi:'Dữ liệu mẫu · Phản hồi AI mô phỏng'}[language]}</p>}
         {tab==='settings'&&<Settings profile={data.profile} language={language} site={site} busy={busy||listening} onLanguage={changeLanguage} onSite={changeSite}/>}
         {tab==='settings'&&!data.demo&&<form className="panel flow" onSubmit={event=>{event.preventDefault();const name=String(new FormData(event.currentTarget).get('displayName')??'');run(async()=>{await request(token,{action:'profileName',name});await refresh(token);});}}><label>{{ja:'表示名',en:'Display name',vi:'Tên hiển thị'}[language]}<input key={data.profile.name} name="displayName" defaultValue={data.profile.name} required maxLength={100}/></label><button disabled={busy}>{{ja:'表示名を保存',en:'Save display name',vi:'Lưu tên hiển thị'}[language]}</button></form>}
-        {tab==='members'&&manager&&<section className="panel flow"><h2>メンバー・招待</h2><ul className="member-list">{data.managers?.filter(person=>person.siteIds.includes(site)).map(person=><li key={person.id}><strong>{person.name}</strong><small>{t('manager')}</small></li>)}{data.staff.filter(person=>person.siteIds.includes(site)).map(person=><li key={person.id}><strong>{person.name}</strong><small>{t('employee')}</small></li>)}</ul>{data.demo?<p className="notice">試用モードの招待コードは <code>DEMO2026</code> です。</p>:<form className="flow" onSubmit={event=>{event.preventDefault();const values=new FormData(event.currentTarget);run(async()=>setInvite(await request(token,{siteId:site,hours:Number(values.get('hours')),uses:Number(values.get('uses'))},'?invite')));}}><label>有効時間<input name="hours" type="number" min="1" max="168" defaultValue="24" required/></label><label>使用上限<input name="uses" type="number" min="1" max="50" defaultValue="5" required/></label><button disabled={busy}>招待コードを発行</button></form>}{invite&&<p className="notice"><code>{invite.code}</code><br/>有効期限: {new Date(invite.expiresAt).toLocaleString(language)}</p>}</section>}
+        {tab==='members'&&manager&&<section className="panel flow"><h2>メンバー・招待</h2><ul className="member-list">{data.managers?.filter(person=>person.siteIds.includes(site)).map(person=><li key={person.id}><strong>{person.name}</strong><small>{t('manager')}</small></li>)}{data.staff.filter(person=>person.siteIds.includes(site)).map(person=><li key={person.id}><strong>{person.name}</strong><small>{t('employee')}</small></li>)}</ul>{data.demo?<p className="notice">試用モードの招待コードは <code>123456</code> です。</p>:<form className="flow" onSubmit={event=>{event.preventDefault();const values=new FormData(event.currentTarget);run(async()=>setInvite(await request(token,{siteId:site,uses:Number(values.get('uses'))},'?invite')));}}><p>有効時間は発行から24時間です。</p><label>コード使用上限<input name="uses" type="number" min="1" max="50" defaultValue="5" required/></label><button disabled={busy}>招待コードを発行</button></form>}{invite&&<p className="notice"><code>{invite.code}</code><br/>有効期限: {new Date(invite.expiresAt).toLocaleString(language)}</p>}</section>}
         {error && <p className="alert" role="alert">{errorText}</p>}
         {busy && <p className="busy" role="status">{t('searching')}</p>}
         {tab === 'home' && !manager && <>
@@ -290,22 +292,20 @@ export default function BridgeWork() {
           {consultOpen&&(results||searching)&&<button className="secondary direct-contact" type="button" disabled={busy||!query.trim()} onClick={()=>ask()}>{t('send')} →</button>}
           {!consultOpen&&manuals.length>0&&<section className="panel flow"><h2>{{ja:'もう一度見る',en:'Open a guide again',vi:'Xem lại hướng dẫn'}[language]}</h2>{manuals.slice(0,2).map(item=><button className="secondary" key={item.id} onClick={()=>readManual(item)}>{(item.translations[language]??item.content).title}</button>)}</section>}
         </>}
-        {tab === 'home' && manager && <>
-          <div className="stats">{(['new','active','resolved'] as const).map(status => <button className="panel stat" key={status} onClick={() => {setStatusFilter(status); changeTab('cases');}}>
-            <Badge variant={status}>{t(status)}</Badge><strong>{questions.filter(row => row.status === status).length}</strong></button>)}</div>
-          <section className="panel flow"><div className="split"><h2>{t('recent')}</h2><button className="link" onClick={() => {setStatusFilter('all');changeTab('cases');}}>{t('all')} →</button></div>
-            {caseList(questions.slice(0,4))}
-          </section>
-          <section className="panel flow"><div className="split"><h2>{t('manuals')}</h2><button className="link" onClick={() => changeTab('manuals')}>{t('all')} →</button></div>
-            <div className="actions">{manuals.slice(0,5).map(row => <button className="secondary" key={row.id} onClick={() => openManual(row.id)}>{row.content.title}</button>)}</div>
-          </section>
-        </>}
         {tab === 'cases' && <>
-          <section className={'panel flow '+(question?'case-list-with-detail':'')}><div className="split"><h2>{t('cases')}</h2><div className="actions">
-            {manager && <select aria-label="対応状況" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
-              <option value="all">すべて</option>{(['new','active','resolved'] as const).map(status => <option key={status} value={status}>{t(status)}</option>)}
-            </select>}<button className="secondary" disabled={busy} onClick={() => run(async () => {await refresh(token);})}>{t('refresh')}</button>
-          </div></div>{caseList(questions.filter(row => statusFilter === 'all' || row.status === statusFilter))}</section>
+          <section className={'panel flow '+(question?'case-list-with-detail':'')}>
+            <div className="split">
+              <h2>{manager?({ja:'相談',en:'Consultations',vi:'Trao đổi'}[language]):t('cases')}</h2>
+              <button className="secondary" disabled={busy} onClick={() => run(async () => {await refresh(token);})}>{t('refresh')}</button>
+            </div>
+            {manager&&<div className="stats" role="group" aria-label="対応状況">
+              {(['new','active','resolved'] as const).map(status=><button type="button" className="panel stat" key={status}
+                aria-pressed={statusFilter===status} onClick={()=>{setStatusFilter(status);setSelected('');}}>
+                <Badge variant={status}>{t(status)}</Badge><strong>{questions.filter(row=>row.status===status).length}</strong>
+              </button>)}
+            </div>}
+            {caseList(manager?questions.filter(row=>row.status===statusFilter):questions)}
+          </section>
           {question && <section className="panel flow chat-screen">
             <header className="chat-header"><button className="screen-back" type="button" onClick={()=>setSelected('')} aria-label={{ja:'戻る',en:'Back',vi:'Quay lại'}[language]}>‹</button><span className="chat-avatar" aria-hidden="true">{chatPeer?.slice(0,1)||'•'}</span><div className="chat-peer"><strong>{chatPeer||t(manager?'employee':'manager')}</strong><small>{t(manager?'employee':'manager')}</small></div><Badge variant={question.status}>{t(question.status)}</Badge></header>
             {manager&&question.status!=='resolved'&&(!question.assigneeId?<button className="secondary" disabled={busy} onClick={()=>run(async()=>{await send({action:'assign',id:question.id});await refresh(token);})}>対応する</button>:question.assigneeId===data.profile.id&&<details><summary>担当者を変更</summary><select aria-label="引き継ぎ先" value="" disabled={busy} onChange={event=>{const managerId=event.target.value;if(managerId)run(async()=>{await send({action:'assign',id:question.id,managerId});await refresh(token);});}}><option value="">引き継ぎ先を選択</option>{data.managers?.filter(person=>person.id!==data.profile.id&&person.siteIds.includes(site)).map(person=><option key={person.id} value={person.id}>{person.name}</option>)}</select></details>)}
