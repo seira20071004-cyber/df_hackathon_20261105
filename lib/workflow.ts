@@ -3,6 +3,7 @@ import { after } from 'next/server';
 import {deleteDocument,directManual,documentList,documentPermission,materializeDocument,processDocument,queueDocument,uploadPdf} from './documents';
 import { z } from 'zod';
 import { aiConfigured, embedding,generate, manualContent, relevance, summarize, translate } from './ai';
+import {chatTranslationEnabled,translateChatBatch} from './chat-translation';
 import { buildManual, generationRunning } from './manuals';
 import { figureSchema, normalizeFigures, reorderedAssets } from './manual-assets';
 import {CONTACT_TEXT,blockText,graphIssues,graphShape,programContent,programSchema,validRunPath} from './manual-graph';
@@ -37,12 +38,13 @@ export const actionSchema = z.discriminatedUnion('action', [
   z.object({action: z.literal('search'), ...location, text, language: z.enum(languages)}),
   z.object({action: z.literal('ask'), ...location, text, language: z.enum(languages), id: z.uuid(),intake:intake.optional(),photo:consultationPhotoSchema.optional()}),
   z.object({action:z.literal('reclassify'),...record}),
+  z.object({action:z.literal('chatTranslations'),...record,messageIds:z.array(slug).min(1).max(8),language:z.enum(languages)}),
   z.object({action:z.literal('retryTranslation'),...record,messageId:slug,language:z.enum(languages)}),
   z.object({action:z.literal('assign'),...record,managerId:slug.optional()}),
   z.object({action:z.literal('prepareSource'),...record,version:z.string().max(40)}),
   z.object({action:z.literal('hideSource'),...record,version:z.string().max(40),index:z.number().int().min(0).max(120),start:z.number().int().min(0).max(100000),end:z.number().int().min(1).max(100000)}),
   z.object({action:z.literal('approveSource'),...record,version:z.string().max(40),confirmed:z.literal(true)}),
-  z.object({action: z.literal('reply'), ...record, text, messageId: z.uuid()}),
+  z.object({action: z.literal('reply'), ...record, text, messageId: z.uuid(),language:z.enum(languages).optional()}),
   z.object({action: z.literal('resolve'), ...record, text: z.string().trim().max(3000).optional()}),
   z.object({action: z.literal('reuse'), ...record, approved: z.boolean()}),
   z.object({action: z.literal('selfResolve'), ...location, text, language: z.enum(languages), matchId: slug, kind: z.enum(['question','manual']), id: z.uuid()}),
@@ -259,6 +261,28 @@ export async function execute(profile: Profile, input: Action) {
     const consultation=await classifyConsultation(sources,'ja',policy?.keywords);
     return mutate(profile,siteId,'questions',input.id,current=>{if(!current||current.messages.at(-1)?.id!==question.messages.at(-1)?.id)throw new ApiError(409,'conversation-updated');return {...current,consultation};});
   }
+  if(input.action==='chatTranslations'){
+    const question=questions.find(row=>row.id===input.id&&mayReadQuestion(profile,row));
+    if(!question)throw new ApiError(404,'not-found');
+    const messages=new Map(question.messages.map(row=>[row.id,{
+      original:row.originalText,source:row.sourceLanguage??(row.role==='manager'?'ja':question.originalLanguage),
+      saved:row.targetLanguage===input.language?row.translatedText:'',
+    }]));
+    messages.set('opening',{original:question.originalText,source:question.originalLanguage,saved:input.language==='ja'?question.japaneseText:''});
+    const ids=[...new Set(input.messageIds)];
+    const selected=ids.map(id=>messages.get(id));
+    if(selected.some(row=>!row))throw new ApiError(404,'not-found');
+    const rows=selected.filter(row=>row!==undefined);
+    try{
+      const translations=chatTranslationEnabled()?await translateChatBatch(rows.map(row=>row.original),input.language):
+        await Promise.all(rows.map(async row=>{
+          if(row.source===input.language)return null;
+          const result=row.saved||await translate(row.original,row.source,input.language,isDemo());
+          return !result?false:result===row.original?null:result;
+        }));
+      return {translations:ids.map((id,index)=>({id,text:translations[index]}))};
+    }catch{throw new ApiError(503,'translation-unavailable');}
+  }
   if(input.action==='retryTranslation'){
     const question=questions.find(row=>row.id===input.id&&mayReadQuestion(profile,row)),message=question?.messages.find(row=>row.id===input.messageId);
     if(!question||!message)throw new ApiError(404,'not-found');
@@ -288,7 +312,7 @@ export async function execute(profile: Profile, input: Action) {
       if(result.created)after(()=>prepareManualSource(profile,manual,result.question));
       return result.question;
     }
-    const source = profile.role === 'manager' ? 'ja' : previous.originalLanguage;
+    const source = input.action==='reply'&&input.language?input.language:profile.role==='manager'?'ja':previous.originalLanguage;
     const target = profile.role === 'manager' ? previous.originalLanguage : 'ja';
     const translatedText = input.action === 'reply' ? await translate(input.text, source, target, isDemo()) : '';
     return mutate(profile, siteId, 'questions', input.id, question => {

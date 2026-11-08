@@ -14,6 +14,10 @@ test('SDK pipeline, supplements, approval, sessions and escalation remain scoped
  const root=fileURLToPath(new URL('../',import.meta.url));await mkdir(join(root,'.bridge-work'),{recursive:true});
  const folder=await mkdtemp(join(root,'.bridge-work','manual-test-'));const seed={...seedDemo(),manualViews:[],manualDeliveries:[],manualUses:[]};
  seed.manuals.push({...structuredClone(seed.manuals[0]),id:'foreign-manual',organizationId:'other-company',content:{...seed.manuals[0].content,title:'他組織だけの秘密情報'}});
+ const sourceChat=seed.questions.find(row=>row.id==='demo-scanner-chat');
+ seed.questions.push({...structuredClone(sourceChat),id:'bilingual-chat-test',originalLanguage:'en',originalText:'The scanner is stuck.',
+  japaneseText:'スキャナーが止まっています。',messages:[{...sourceChat.messages[0],id:'bilingual-reply',sourceLanguage:'vi',
+   originalText:'Hãy kiểm tra đèn.',translatedText:'ランプを確認してください。',targetLanguage:'ja'}]});
  await writeFile(join(folder,'data.json'),JSON.stringify(seed));
  const socket=createServer();await new Promise(resolve=>socket.listen(0,'127.0.0.1',resolve));const port=socket.address().port;await new Promise(resolve=>socket.close(resolve));
  const child=spawn(process.execPath,['--import',new URL('./provider-mock.mjs',import.meta.url).href,join(root,'node_modules/next/dist/bin/next'),...(process.env.BRIDGE_TEST_DEV==='true'?['dev','--webpack']:['start']),'-H','127.0.0.1','-p',String(port)],{cwd:root,env:{...process.env,BRIDGE_DEMO:'true',BRIDGE_PRIVACY_STRICT:'false',BRIDGE_SENSITIVE_PROVIDER:'local',GEMINI_API_KEY_SECRET:'',GEMINI_API_KEY_FILE:'',BRIDGE_ALLOW_PUBLIC_DEMO:'true',BRIDGE_USER_REQUESTS_PER_MINUTE:'10000',BRIDGE_ORG_REQUESTS_PER_MINUTE:'20000',BRIDGE_AI_CALLS_PER_MINUTE:'10000',BRIDGE_DEMO_DATA_DIR:folder,GEMINI_API_KEY:'test-fixture',GEMINI_PROVIDER:'developer',GOOGLE_GENAI_USE_VERTEXAI:'false',GEMINI_GENERATE_IMAGES:'false',GEMINI_EMBEDDING_MODEL:'test-embedding',BRIDGE_AI_PHOTO_ENABLED:'true'},stdio:['ignore','pipe','pipe']});
@@ -22,6 +26,10 @@ test('SDK pipeline, supplements, approval, sessions and escalation remain scoped
  const url='http://127.0.0.1:'+port+'/api/bridge';let ready=false;
  for(let i=0;i<180;i++){ready=await fetch(url+'?config').then(response=>response.ok).catch(()=>false);if(ready)break;await new Promise(resolve=>setTimeout(resolve,100));}assert.ok(ready,log);
  async function api(actor,input,status=200){const response=await fetch(url,{method:input?'POST':'GET',headers:{Authorization:'Bearer '+actor,'Content-Type':'application/json'},body:input?JSON.stringify({siteId:'sakura',...input}):undefined});const result=await response.json();assert.equal(response.status,status,JSON.stringify(result)+'\n'+log);return result;}
+ const chatRequest={action:'chatTranslations',id:'bilingual-chat-test',messageIds:['opening','bilingual-reply'],language:'ja'};
+ assert.deepEqual((await api('sato',chatRequest)).translations,[{id:'opening',text:'スキャナーが止まっています。'},{id:'bilingual-reply',text:'ランプを確認してください。'}]);
+ assert.deepEqual((await api('alex',{...chatRequest,messageIds:['opening'],language:'en'})).translations,[{id:'opening',text:null}]);
+ await api('linh',chatRequest,404);
  async function approve(id,answerCount=0){
   let row;for(let i=0;i<100;i++){row=(await api('sato')).manuals.find(item=>item.id===id);if(row?.protectedSource?.context?.sources.filter(source=>source.role==='manager_supplement').length===answerCount)break;await new Promise(resolve=>setTimeout(resolve,100));}
   assert.equal(row.generation.state,'held');assert.equal(row.pipeline?.verification==='passed',false);

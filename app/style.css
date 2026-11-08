@@ -70,9 +70,8 @@ nav { display:grid; gap:5px; }
 .result { border:1px solid var(--line); border-radius:13px; padding:15px; }
 .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
 .stat { justify-content:space-between; color:var(--ink); text-align:left; }
-.stat strong { font-size:1.8rem; }
-.stat[aria-pressed="true"] { background:#1745df; border-color:#1745df; color:white; }
-.stat[aria-pressed="true"] .badge { background:white; color:#173fae; }
+.stat strong { font-size:1.8rem; border-radius:8px; padding:0 .35em; }
+.stat[aria-pressed="true"] strong { background:#1745df; color:white; }
 .messages { display:grid; gap:9px; }
 .bubble { justify-self:start; max-width:90%; padding:10px 14px; border-radius:14px; background:#eef3fa; overflow-wrap:anywhere; }
 .bubble.own { justify-self:end; background:#e8f0ff; }
@@ -305,7 +304,7 @@ footer { color:var(--muted); font-size:.8rem; text-align:center; padding:8px; }
 .account-circle img{width:100%;height:100%;border-radius:50%;object-fit:cover}
 .source-review textarea{width:100%;font:inherit;line-height:1.6;color:inherit;background:#fff;resize:vertical}
 .source-review textarea::selection{background:#a7c5ff;color:#102347}
-.chat-original{display:block;border-top:1px solid #d8e2f1;padding-top:.4rem;overflow-wrap:anywhere}
+.chat-translation{white-space:pre-wrap;display:block;border-top:1px solid #d8e2f1;padding-top:.4rem;overflow-wrap:anywhere}
 .guide-overview{padding-left:1.5rem}
 .guide-overview li{padding:.3rem .5rem}
 .guide-overview .on-path{background:#dceaff;border-radius:.5rem;font-weight:700}

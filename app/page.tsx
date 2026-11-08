@@ -6,6 +6,7 @@ import { ManualReview, ManualView, isGenerating } from './manual';
 import {ManualInbox,ManualSend} from './manual-delivery';
 import {DocumentLibrary} from './document-library';
 import {AdaptiveIntake} from './adaptive-intake';
+import {ChatMessages} from './chat-messages';
 import type {AdaptiveDetails,IntakeAnswer} from '../lib/adaptive';
 import {OrganizationEntry} from './organization-entry';
 import {GOOGLE_SESSION,googleAuthClient,googleSessionToken,signOutGoogle,type GoogleConfig} from './google-session';
@@ -39,7 +40,6 @@ export default function BridgeWork() {
   const [data,setData] = useState<Workspace>();
   const [googleAuth,setGoogleAuth]=useState<GoogleConfig>();
   const [invite,setInvite]=useState<{code:string;expiresAt:string}>();
-  const [chatTranslations,setChatTranslations]=useState<Record<string,string>>({});
   const [manualFilter,setManualFilter]=useState('');
   const [demo,setDemo] = useState<boolean>();
   const [photoEnabled,setPhotoEnabled]=useState(false);
@@ -125,7 +125,7 @@ export default function BridgeWork() {
   }
   function changeSite(next:string){setInvite(undefined);setSite(next);setSelected('');setManualId('');setResults(undefined);}
   function signOut(){
-    setPhoto(undefined);setInvite(undefined);setManualFilter('');setChatTranslations({});setIntake([]);setConsultOpen(false);
+    setPhoto(undefined);setInvite(undefined);setManualFilter('');setIntake([]);setConsultOpen(false);
     if(googleAuth)void signOutGoogle().catch(()=>undefined);
     sessionStorage.removeItem('bridge-token');setToken('');setData(undefined);setLanguage('ja');setQuery('');setResults(undefined);setSelected('');
     setManualId('');setMessage('');setReuseConfirmed(false);setError('');setTab('home');setStatusFilter('new');
@@ -167,6 +167,7 @@ export default function BridgeWork() {
   const deliveries=data?.deliveries.filter(row=>row.siteId===site) ?? [];
   const unread=manager?0:deliveries.filter(row=>!row.readAt).length;
   const send=useCallback(<T,>(payload:object)=>request<T>(token,{siteId:site,...payload}),[request,token,site]);
+  const requestChatTranslations=useCallback((messageIds:string[])=>send<{translations:{id:string;text:string|null|false}[]}>({action:'chatTranslations',id:selected,messageIds,language}),[send,selected,language]);
   async function downloadSource(id:string,guide?:Manual,page?:number){
     const suffix='?sourcePdf='+id+'&site='+encodeURIComponent(site)+(guide?'&manual='+encodeURIComponent(guide.id)+'&version='+encodeURIComponent(guide.updatedAt):'')+(page?'&page='+page:'');
     const credential=token===GOOGLE_SESSION?await googleSessionToken():token;
@@ -310,19 +311,11 @@ export default function BridgeWork() {
             <header className="chat-header"><button className="screen-back" type="button" onClick={()=>setSelected('')} aria-label={{ja:'戻る',en:'Back',vi:'Quay lại'}[language]}>‹</button><span className="chat-avatar" aria-hidden="true">{chatPeer?.slice(0,1)||'•'}</span><div className="chat-peer"><strong>{chatPeer||t(manager?'employee':'manager')}</strong><small>{t(manager?'employee':'manager')}</small></div><Badge variant={question.status}>{t(question.status)}</Badge></header>
             {manager&&question.status!=='resolved'&&(!question.assigneeId?<button className="secondary" disabled={busy} onClick={()=>run(async()=>{await send({action:'assign',id:question.id});await refresh(token);})}>対応する</button>:question.assigneeId===data.profile.id&&<details><summary>担当者を変更</summary><select aria-label="引き継ぎ先" value="" disabled={busy} onChange={event=>{const managerId=event.target.value;if(managerId)run(async()=>{await send({action:'assign',id:question.id,managerId});await refresh(token);});}}><option value="">引き継ぎ先を選択</option>{data.managers?.filter(person=>person.id!==data.profile.id&&person.siteIds.includes(site)).map(person=><option key={person.id} value={person.id}>{person.name}</option>)}</select></details>)}
             {question.references.map(reference => <div className="notice" key={reference.kind + reference.id}>{reference.title} · {reference.answer}</div>)}
-            {!!question.intakeAnswers?.length&&<details className="notice"><summary>{{ja:'追加質問への回答',en:'Intake answers',vi:'Câu trả lời bổ sung'}[language]}</summary><ul>{question.intakeAnswers.map((row,index)=><li key={index}>{row.prompt&&<small>{row.prompt}<br/></small>}{row.text}</li>)}</ul></details>}
-            {manager&&<details className="notice"><summary>相談の整理{question.consultation?' · '+({troubleshooting:'トラブル解決',procedure:'業務手続き',work_instruction:'作業方法',information_support:'情報・翻訳',unknown:'分類不明'}[question.consultation.primary]):''}</summary>
-              {question.consultation&&<><p>危険度：{{normal:'通常',caution:'要注意',emergency:'緊急',unknown:'不明'}[question.consultation.risk]}</p>{!!question.consultation.riskEvidence?.length&&<ul>{question.consultation.riskEvidence.map(row=><li key={row.sourceId}>{row.quote}</li>)}</ul>}<ul>{question.consultation.facts.map((fact,index)=><li key={index}>{{confirmed:'確認済み',inferred:'推測',unknown:'未確認',conflicting:'矛盾'}[fact.state]}：{fact.value}</li>)}</ul></>}
-              <button className="secondary" disabled={busy} onClick={()=>run(async()=>{await send({action:'reclassify',id:question.id});await refresh(token);})}>会話を再分類</button></details>}
-            <div className="messages" aria-label={t('cases')}><article className={'bubble '+(!manager?'own':'')}><p>{manager?question.japaneseText||question.originalText:question.originalText}</p>{question.japaneseText&&question.japaneseText!==question.originalText&&<small className="chat-original">{manager?question.originalText:question.japaneseText}</small>}</article>{question.messages.map(row=>{const own=row.senderId===data.profile.id,key=question.id+':'+row.id+':'+language,originalLanguage=row.sourceLanguage??(row.role==='manager'?'ja':question.originalLanguage),translated=chatTranslations[key]||(row.targetLanguage===language?row.translatedText:'');
-              return <article key={row.id} className={'bubble '+(own?'own':'')}><small>{row.senderName?row.senderName+' · ':''}{t(row.role)} · {new Date(row.createdAt).toLocaleString(language)}</small>
-              <p>{!own&&translated?translated:row.originalText}</p>
-              {own&&row.translatedText&&row.translatedText!==row.originalText?<small className="chat-original">{row.translatedText}</small>:!own&&translated&&translated!==row.originalText&&<small className="chat-original">{row.originalText}</small>}
-              {!own&&!translated&&originalLanguage!==language&&<button className="link" disabled={busy} onClick={()=>run(async()=>{const result=await send<{translatedText:string}>({action:'retryTranslation',id:question.id,messageId:row.id,language});setChatTranslations(current=>({...current,[key]:result.translatedText}));})}>{{ja:'翻訳を再試行',en:'Retry translation',vi:'Thử dịch lại'}[language]}</button>}
-              </article>;})}</div>
+            <ChatMessages key={question.id+':'+language} question={question} viewerId={data.profile.id} language={language}
+              requestTranslations={requestChatTranslations}/>
             {question.status !== 'resolved' ? <>
               {(!manager||!question.assigneeId||question.assigneeId===data.profile.id)&&<form className="chat-composer" onSubmit={event => {event.preventDefault(); run(async () => {
-                await send({action:'reply', id:question.id, text:message, messageId:crypto.randomUUID()}); setMessage(''); await refresh(token);
+                await send({action:'reply', id:question.id, text:message, messageId:crypto.randomUUID(),language}); setMessage(''); await refresh(token);
               });}}><input aria-label={t('message')} placeholder={t('message')} value={message} onChange={event => setMessage(event.target.value)} maxLength={3000} required/>
                 {voiceSupported&&<button type="button" className="secondary" disabled={busy||listening} onClick={()=>dictate('reply')}>{listening?t('listening'):t('voice')}</button>}
                 <button className="chat-send" aria-label={t('reply')} disabled={busy || !message.trim()}>↑</button></form>}
