@@ -42,6 +42,7 @@ test('SDK pipeline, supplements, approval, sessions and escalation remain scoped
   return api('sato',{action:'approveSource',id,version:row.updatedAt,confirmed:true});
  }
  async function resolveQuestion(title){const id=randomUUID();await api('linh',{action:'ask',id,text:title,language:'ja'});await api('sato',{action:'reply',id,messageId:randomUUID(),text:'汚れを目で確認し、乾いた布で拭いてください。商品名が表示されたら解決です。'});
+  await api('sato',{action:'completeHandoff',id});
   const before=Date.now();await api('linh',{action:'resolve',id});assert.ok(Date.now()-before<2000,'Resolution must not wait for Gemini');await api('linh',{action:'resolve',id});
   const matches=(await api('sato')).manuals.filter(manual=>manual.sourceQuestionIds.includes(id));assert.equal(matches.length,1);assert.equal(matches[0].program,undefined);await approve(matches[0].id);return {id,manual:matches[0]};}
  async function completed(id){let manual;for(let i=0;i<150;i++){manual=(await api('sato')).manuals.find(row=>row.id===id);if(['ready','failed','held','awaiting_answers'].includes(manual.generation?.state))return manual;await new Promise(resolve=>setTimeout(resolve,100));}assert.fail(JSON.stringify(manual)+'\n'+log);}
@@ -49,11 +50,13 @@ test('SDK pipeline, supplements, approval, sessions and escalation remain scoped
  assert.deepEqual(await api('linh',{action:'emergencyContact'}),{contact:'',instructions:''});
  await api('linh',{action:'ask',route:'urgent',id:urgentId,text:'緊急の連絡です。',language:'ja'});
  assert.equal((await api('sato')).questions.find(row=>row.id===urgentId).route,'urgent');
+ await api('sato',{action:'completeHandoff',id:urgentId});
  await api('linh',{action:'resolve',id:urgentId});
  assert.equal((await api('sato')).manuals.some(row=>row.sourceQuestionIds.includes(urgentId)),false);
  const faqId=randomUUID(),faqTitle='交通費の社内FAQ';
  await api('linh',{action:'ask',route:'rules',id:faqId,text:faqTitle,language:'ja'});
  await api('sato',{action:'reply',id:faqId,messageId:randomUUID(),text:'人事部へ申請してください。'});
+ await api('sato',{action:'completeHandoff',id:faqId});
  await api('linh',{action:'resolve',id:faqId});
  const faqDraft=(await api('sato')).manuals.find(row=>row.sourceQuestionIds.includes(faqId));
  assert.equal(faqDraft.kind,'faq');
@@ -67,6 +70,7 @@ test('SDK pipeline, supplements, approval, sessions and escalation remain scoped
  assert.equal((await api('alex',{action:'search',text:faqTitle,language:'ja'})).matches.some(row=>row.id===faq.id),false);
  const rejectedId=randomUUID();
  await api('linh',{action:'ask',route:'work',id:rejectedId,text:'業務相談を履歴だけに残す',language:'ja'});
+ await api('sato',{action:'completeHandoff',id:rejectedId});
  await api('linh',{action:'resolve',id:rejectedId});
  let rejected;
  for(let i=0;i<100;i++){

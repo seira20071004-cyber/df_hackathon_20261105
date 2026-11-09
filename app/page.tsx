@@ -58,7 +58,6 @@ export default function BridgeWork() {
   const [emergencyContact,setEmergencyContact]=useState<{contact:string;instructions:string}>();
   const [faqOnly,setFaqOnly]=useState(false);
   const [message,setMessage] = useState('');
-  const [managerNotified,setManagerNotified] = useState(false);
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState('');
   const [reuseConfirmed,setReuseConfirmed] = useState(false);
@@ -134,7 +133,7 @@ export default function BridgeWork() {
     setManualId('');setMessage('');setReuseConfirmed(false);setError('');setTab('home');setStatusFilter('new');
   }
   function openCase(id: string) {
-    changeTab('cases');setSelected(id); setMessage(''); setReuseConfirmed(false);setManagerNotified(false);
+    changeTab('cases');setSelected(id); setMessage(''); setReuseConfirmed(false);
   }
   function openManual(id: string) {
     setManualId(id);
@@ -267,6 +266,7 @@ export default function BridgeWork() {
     : error === 'google-login-failed' ? 'Google ログインを完了できませんでした。再試行してください。'
     : error === 'translation-unavailable' ? t('unavailable')
     : error === 'already-assigned' ? '別の管理者が対応しています。画面を更新してください。'
+    : error === 'handoff-incomplete' ? ({ja:'管理者が伝達完了にすると解決できます。',en:'You can mark this resolved after the manager completes the handoff.',vi:'Bạn có thể đánh dấu đã giải quyết sau khi quản lý xác nhận đã thông báo.'})[language]
     : error === 'source-review-required' ? '保護済みの会話を確認してからマニュアルを作成してください。'
     : error === 'ai-not-configured' ? 'Gemini の設定が必要です。'
     : error === 'source-missing' ? '参照元の会話がありません。文章を編集して図解を再生成できます。'
@@ -385,9 +385,9 @@ export default function BridgeWork() {
               requestTranslations={requestChatTranslations}/>
             {question.status !== 'resolved' ? <>
               {(!manager||!question.assigneeId||question.assigneeId===data.profile.id)&&<form className="chat-composer" onSubmit={event => {event.preventDefault(); if(busy||listening||!message.trim())return; run(async () => {
-                await send({action:'reply', id:question.id, text:message, messageId:crypto.randomUUID(),language}); setMessage('');setManagerNotified(false);await refresh(token);
+                await send({action:'reply', id:question.id, text:message, messageId:crypto.randomUUID(),language}); setMessage('');await refresh(token);
               });}}><textarea aria-label={t('message')} placeholder={t('message')} value={message} rows={2} enterKeyHint="enter"
-                onChange={event=>{setMessage(event.target.value);setManagerNotified(false);}} maxLength={3000} required
+                onChange={event=>setMessage(event.target.value)} maxLength={3000} required
                 onKeyDown={event=>{
                   if(event.key!=='Enter'||event.shiftKey||event.nativeEvent.isComposing||event.keyCode===229||window.matchMedia('(pointer: coarse)').matches)return;
                   event.preventDefault();
@@ -395,12 +395,15 @@ export default function BridgeWork() {
                 }}/>
                 {voiceSupported&&<button type="button" className="secondary" disabled={busy||listening} onClick={()=>dictate('reply')}>{listening?t('listening'):t('voice')}</button>}
                 <button className="chat-send" aria-label={t('reply')} disabled={busy||listening||!message.trim()}>↑</button></form>}
-              {!manager && <div className="actions chat-resolve">
-                <button type="button" className="secondary" aria-pressed={managerNotified} disabled={busy||listening||Boolean(message.trim())}
-                  onClick={()=>setManagerNotified(current=>!current)}>
-                  {managerNotified&&'✓ '}{({ja:'管理者に伝えました',en:'I’ve informed the manager',vi:'Tôi đã báo cho quản lý'})[language]}
+              {manager&&(!question.assigneeId||question.assigneeId===data.profile.id)&&<div className="actions chat-resolve">
+                <button type="button" className="secondary" disabled={busy||listening||Boolean(message.trim())||Boolean(question.handoffCompleted)}
+                  onClick={()=>run(async()=>{await send({action:'completeHandoff',id:question.id});await refresh(token);})}>
+                  {question.handoffCompleted&&'✓ '}{({ja:'伝達完了',en:'Mark handoff complete',vi:'Đánh dấu đã thông báo'})[language]}
                 </button>
-                <button type="button" className="resolve-cta" disabled={busy||listening||!managerNotified||Boolean(message.trim())} onClick={() => run(async () => {
+              </div>}
+              {!manager && <div className="actions chat-resolve">
+                {!question.handoffCompleted&&<small className="muted">{{ja:'管理者の伝達完了を待っています。',en:'Waiting for the manager to complete the handoff.',vi:'Đang chờ quản lý xác nhận đã thông báo.'}[language]}</small>}
+                <button type="button" className="resolve-cta" disabled={busy||listening||!question.handoffCompleted||Boolean(message.trim())} onClick={() => run(async () => {
                 const resolved = await send<Question>({action:'resolve', id:question.id});
                 setData(current => current && {...current, questions: current.questions.map(row =>
                   row.id === resolved.id && row.siteId === resolved.siteId ? resolved : row)});

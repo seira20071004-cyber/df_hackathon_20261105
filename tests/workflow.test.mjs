@@ -90,6 +90,10 @@ test('Vietnamese consultation, safe reuse, and publication survive reload', {tim
   assert.match(row.messages[0].translatedText,/cầu thang/);
   assert.equal(row.status,'active');
   await api('linh',{action:'reply',id,text:vi,messageId:randomUUID()});
+  assert.equal((await api('linh',{action:'resolve',id},409)).error,'handoff-incomplete');
+  await api('linh',{action:'completeHandoff',id},403);
+  const delivered=await api('sato',{action:'completeHandoff',id});
+  assert.deepEqual((await api('linh')).questions.find(row=>row.id===id).handoffCompleted,delivered.handoffCompleted);
   await api('linh',{action:'resolve',id});
   await api('linh',{action:'resolve',id});
   await api('linh',{action:'reuse',id,approved:true},403);

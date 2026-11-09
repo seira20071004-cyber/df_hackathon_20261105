@@ -43,6 +43,7 @@ export const actionSchema = z.discriminatedUnion('action', [
   z.object({action:z.literal('consultationPreviews'),...location,questionIds:z.array(slug).min(1).max(8),language:z.enum(languages)}),
   z.object({action:z.literal('retryTranslation'),...record,messageId:slug,language:z.enum(languages)}),
   z.object({action:z.literal('assign'),...record,managerId:slug.optional()}),
+  z.object({action:z.literal('completeHandoff'),...record}),
   z.object({action:z.literal('prepareSource'),...record,version:z.string().max(40)}),
   z.object({action:z.literal('hideSource'),...record,version:z.string().max(40),index:z.number().int().min(0).max(120),start:z.number().int().min(0).max(100000),end:z.number().int().min(1).max(100000)}),
   z.object({action:z.literal('approveSource'),...record,version:z.string().max(40),confirmed:z.literal(true)}),
@@ -321,6 +322,15 @@ export async function execute(profile: Profile, input: Action) {
     assertRole(profile,'manager');const target=(await siteManagers(profile)).find(row=>row.id===(input.managerId??profile.id)&&row.siteIds.includes(siteId));if(!target)throw new ApiError(400,'invalid-recipient');
     return mutate(profile,siteId,'questions',input.id,question=>{if(!question)throw new ApiError(404,'not-found');if(question.status==='resolved')throw new ApiError(409,'closed-or-limit');if(question.assigneeId&&(!input.managerId||question.assigneeId!==profile.id))throw new ApiError(409,'already-assigned');return {...question,status:'active',assigneeId:target.id,assigneeName:target.name,assignments:[...(question.assignments??[]),{by:profile.id,to:target.id,at:date()}].slice(-50)};});
   }
+  if(input.action==='completeHandoff'){
+    assertRole(profile,'manager');
+    return mutate(profile,siteId,'questions',input.id,question=>{
+      if(!question||!mayReadQuestion(profile,question))throw new ApiError(404,'not-found');
+      if(question.status==='resolved')throw new ApiError(409,'closed-or-limit');
+      if(question.assigneeId&&question.assigneeId!==profile.id)throw new ApiError(409,'already-assigned');
+      return question.handoffCompleted?question:{...question,handoffCompleted:{by:profile.id,at:date()}};
+    });
+  }
   if (input.action === 'reply' || input.action === 'resolve' || input.action === 'reuse') {
     const previous = questions.find(row => row.id === input.id && mayReadQuestion(profile,row));
     if (!previous) throw new ApiError(404, 'not-found');
@@ -328,15 +338,18 @@ export async function execute(profile: Profile, input: Action) {
     if (input.action === 'resolve') {
       assertRole(profile, 'employee');
       if (previous.status === 'resolved') return previous;
+      if(!previous.handoffCompleted)throw new ApiError(409,'handoff-incomplete');
       const resolution = input.text ?? '';
       if(previous.route==='urgent')return mutate(profile,siteId,'questions',input.id,question=>{
         if(!question||!mayReadQuestion(profile,question))throw new ApiError(404,'not-found');
+        if(question.status!=='resolved'&&!question.handoffCompleted)throw new ApiError(409,'handoff-incomplete');
         return question.status==='resolved'?question:{...question,status:'resolved',resolvedAt:date(),resolution};
       });
       const manual = createDraft(previous);
       const result = await resolveWithManual(profile, siteId, manual, question => {
         if (!question || !mayReadQuestion(profile, question)) throw new ApiError(404, 'not-found');
         if (question.status === 'resolved') return question;
+        if(!question.handoffCompleted)throw new ApiError(409,'handoff-incomplete');
         if (question.messages.length !== previous.messages.length) throw new ApiError(409, 'conversation-updated');
         return {...question, status: 'resolved', resolvedAt: date(), resolution};
       });

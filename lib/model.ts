@@ -33,6 +33,7 @@ export interface Question {
   intakeAnswers?:import('./adaptive').IntakeAnswer[];
   assigneeId?:string;
   assigneeName?:string;
+  handoffCompleted?:{by:string;at:string};
   assignments?:{by:string;to:string;at:string}[];
   employeeId: string;
   originalText: string;
