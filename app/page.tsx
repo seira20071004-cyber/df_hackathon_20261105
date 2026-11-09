@@ -39,7 +39,6 @@ export default function BridgeWork() {
   const [data,setData] = useState<Workspace>();
   const [googleAuth,setGoogleAuth]=useState<GoogleConfig>();
   const [invite,setInvite]=useState<{code:string;expiresAt:string}>();
-  const [manualFilter,setManualFilter]=useState('');
   const [demo,setDemo] = useState<boolean>();
   const [photoEnabled,setPhotoEnabled]=useState(false);
   const [photo,setPhoto]=useState<{data:string;name:string}>();
@@ -127,7 +126,7 @@ export default function BridgeWork() {
   }
   function changeSite(next:string){setInvite(undefined);setSite(next);setSelected('');setManualId('');setResults(undefined);}
   function signOut(){
-    setPhoto(undefined);setInvite(undefined);setManualFilter('');setConsultOpen(false);
+    setPhoto(undefined);setInvite(undefined);setConsultOpen(false);
     if(googleAuth)void signOutGoogle().catch(()=>undefined);
     sessionStorage.removeItem('bridge-token');setToken('');setData(undefined);setLanguage('ja');setQuery('');setResults(undefined);setSelected('');
     setManualId('');setMessage('');setReuseConfirmed(false);setError('');setTab('home');setStatusFilter('new');
@@ -292,17 +291,21 @@ export default function BridgeWork() {
   </section></main>;
 
   function caseList(items: Question[]) {
-    return items.length ? <div className="rows">{items.map(row => <button className={'row ' + (selected === row.id ? 'selected' : '')} key={row.id} onClick={() => openCase(row.id)}>
-      <span className="tile" aria-hidden="true">◫</span><span className="row-text"><strong>{row.originalLanguage===language?row.originalText:previewTexts?.get(row.id)||(language==='ja'?row.japaneseText:'')||row.originalText}</strong><small>{siteName(row.siteId)} · {new Date(row.createdAt).toLocaleDateString(language)}</small></span>
+    const labels={ja:{loading:'タイトルを翻訳中',failed:'タイトルを翻訳できませんでした'},en:{loading:'Translating title',failed:'Title translation unavailable'},vi:{loading:'Đang dịch tiêu đề',failed:'Không dịch được tiêu đề'}}[language];
+    return items.length ? <div className="rows">{items.map(row=>{
+      const title=row.originalLanguage===language?row.originalText:previewTexts?.get(row.id)||(language==='ja'&&row.japaneseText!==row.originalText?row.japaneseText:'');
+      const failed=!title&&previewTexts?.has(row.id);
+      return <button className={'row ' + (selected === row.id ? 'selected' : '')} key={row.id} onClick={() => openCase(row.id)}>
+      <span className="tile" aria-hidden="true">◫</span><span className="row-text"><strong>{title||(failed?labels.failed:<>{labels.loading}<PendingDots/></>)}</strong>{failed&&<small lang={row.originalLanguage}>{row.originalText}</small>}<small>{siteName(row.siteId)} · {new Date(row.createdAt).toLocaleDateString(language)}</small></span>
       <span className="case-badges">
         {row.route==='urgent'&&<span className="badge urgent-badge">{{ja:'緊急',en:'Urgent',vi:'Khẩn cấp'}[language]}</span>}
         {manager&&row.status==='resolved'&&pendingHistory.has(row.id)&&<span className="badge active">履歴承認待ち</span>}
         <Badge variant={row.status}>{t(row.status)}</Badge>
       </span><span aria-hidden="true">›</span>
-    </button>)}</div> : <p className="empty">{t('empty')}</p>;
+    </button>;})}</div> : <p className="empty">{t('empty')}</p>;
   }
 
-  return <WorkspaceShell profile={data.profile} language={language} tab={tab} unread={unread} demo={data.demo} busy={busy||listening} onNavigate={next=>{if(manager&&next==='manuals')setManualId('');changeTab(next);}} onSignOut={signOut}>
+  return <WorkspaceShell profile={data.profile} language={language} tab={tab} unread={unread} demo={data.demo} busy={busy||listening} onNavigate={next=>{if(next==='manuals')setManualId('');changeTab(next);}} onSignOut={signOut}>
         {data.aiFixtures&&<p className="notice" role="status">{{ja:'架空のデモ · AIは模擬応答です',en:'Fictional demo · Simulated AI responses',vi:'Dữ liệu mẫu · Phản hồi AI mô phỏng'}[language]}</p>}
         {tab==='settings'&&<Settings profile={data.profile} language={language} site={site} busy={busy||listening} onLanguage={changeLanguage} onSite={changeSite}/>}
         {tab==='settings'&&!data.demo&&<form className="panel flow" onSubmit={event=>{event.preventDefault();const name=String(new FormData(event.currentTarget).get('displayName')??'');run(async()=>{await request(token,{action:'profileName',name});await refresh(token);});}}><label>{{ja:'表示名',en:'Display name',vi:'Tên hiển thị'}[language]}<input key={data.profile.name} name="displayName" defaultValue={data.profile.name} required maxLength={100}/></label><button disabled={busy}>{{ja:'表示名を保存',en:'Save display name',vi:'Lưu tên hiển thị'}[language]}</button></form>}
@@ -363,7 +366,10 @@ export default function BridgeWork() {
           <section className={'panel flow '+(question?'case-list-with-detail':'')}>
             <div className="split">
               <h2>{manager?({ja:'相談',en:'Consultations',vi:'Trao đổi'}[language]):t('cases')}</h2>
-              <button className="secondary" disabled={busy} onClick={() => run(async () => {await refresh(token);})}>{t('refresh')}</button>
+              <button className="secondary" disabled={busy} onClick={() => run(async () => {
+                await refresh(token);
+                setPreviews(current=>current?.scope===previewScope?{...current,texts:new Map([...current.texts].filter(([,text])=>text!==null))}:current);
+              })}>{t('refresh')}</button>
             </div>
             {manager&&<div className="stats" role="group" aria-label="対応状況">
               {(['new','active','resolved'] as const).map(status=><button type="button" className="panel stat" key={status} data-status={status}
@@ -469,17 +475,12 @@ export default function BridgeWork() {
                 await send({action:'saveManual',id:reviewManual.id,version:reviewManual.updatedAt,content,publish,...edits});
                 setManualStatus(publish ? 'published' : 'draft');setManualId(reviewManual.id);await refresh(token);
               })}/>}
-          </> : <>
-            <ManualInbox deliveries={deliveries} manuals={manuals} language={language} busy={busy} onOpen={readManual}/>
-            <section className="panel flow">
-              <h2>{{ja:'参照したマニュアル',en:'Guides you have used',vi:'Tài liệu đã tham khảo'}[language]}</h2>
-              <input aria-label={t('search')} placeholder={t('search')} value={manualFilter} onChange={event=>setManualFilter(event.target.value)}/>
-              {manuals.filter(row=>!deliveries.some(delivery=>delivery.manualId===row.id)).length ? <div className="rows">{manuals.filter(row=>!deliveries.some(delivery=>delivery.manualId===row.id)&&(row.translations[language]??row.content).title.toLocaleLowerCase().includes(manualFilter.trim().toLocaleLowerCase())).map(row => <button className="row" key={row.id} onClick={() => readManual(row)}>
-                <span className="tile">▤</span><span className="row-text"><strong>{(row.translations[language] ?? row.content).title}</strong><small>{siteName(row.siteId)}</small></span>
-                <span>›</span></button>)}</div> : <p className="empty">{t('empty')}</p>}
-            </section>
-            {manual&&<><ManualView manual={manual} language={language} onEvent={manualEvent(manual)}/>{sourceLink(manual)}{reportGuide(manual)}</>}
-          </>}
+          </> : manual?<div className="flow" key={manual.id}>
+            <div className="screen-title"><button type="button" className="secondary" onClick={()=>{setManualId('');setError('');}}>
+              ‹ {{ja:'届いたマニュアルに戻る',en:'Back to received guides',vi:'Quay lại tài liệu đã nhận'}[language]}
+            </button></div>
+            <ManualView manual={manual} language={language} onEvent={manualEvent(manual)}/>{sourceLink(manual)}{reportGuide(manual)}
+          </div>:<ManualInbox deliveries={deliveries} manuals={manuals} language={language} busy={busy} onOpen={readManual}/>}
         </>}
         <footer>Bridge Work <span>·</span> {siteName(site)}</footer>
   </WorkspaceShell>;

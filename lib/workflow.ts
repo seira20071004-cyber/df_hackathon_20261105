@@ -282,9 +282,13 @@ export async function execute(profile: Profile, input: Action) {
         input.language==='ja'&&row.japaneseText!==row.originalText?row.japaneseText:'']));
       const pending=rows.filter(row=>!previews.get(row.id));
       if(pending.length){
-        const translations=chatTranslationEnabled()?await translateChatBatch(pending.map(row=>row.originalText),input.language):
-          await Promise.all(pending.map(row=>translate(row.originalText,row.originalLanguage,input.language,isDemo())));
-        pending.forEach((row,index)=>previews.set(row.id,translations[index]||''));
+        const cloud=chatTranslationEnabled()
+          ? await translateChatBatch(pending.map(row=>row.originalText),input.language).catch(()=>[])
+          : [];
+        await Promise.all(pending.map(async(row,index)=>{
+          const translated=cloud[index]||await translate(row.originalText,row.originalLanguage,input.language,isDemo()).catch(()=>'');
+          previews.set(row.id,translated||'');
+        }));
       }
       return {translations:rows.map(row=>({id:row.id,text:previews.get(row.id)||null}))};
     }catch{throw new ApiError(503,'translation-unavailable');}

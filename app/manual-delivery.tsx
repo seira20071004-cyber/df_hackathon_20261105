@@ -38,7 +38,9 @@ const inboxCopy={ja:{title:'届いたマニュアル',from:'管理者から',unr
   vi:{title:'Tài liệu từ quản lý',from:'Từ quản lý',unread:'Chưa đọc',read:'Đã đọc'}};
 export function ManualInbox({deliveries,manuals,language,busy,onOpen}:{deliveries:ManualDelivery[];manuals:Manual[];language:Language;busy:boolean;onOpen:(manual:Manual)=>void}) {
   const text=inboxCopy[language];
-  if(!deliveries.length)return null;
+  if(!deliveries.length)return <section className="panel flow manual-inbox"><h2>{text.title}</h2>
+    <p className="empty">{{ja:'届いたマニュアルはまだありません。',en:'No guides received yet.',vi:'Chưa nhận được tài liệu nào.'}[language]}</p>
+  </section>;
   return <section className="panel flow manual-inbox"><div className="split"><h2>{text.title}</h2>
     <span className="badge active">{deliveries.filter(row=>!row.readAt).length} {text.unread}</span></div>
     <div className="rows">{deliveries.map(delivery=>{const manual=manuals.find(row=>row.id===delivery.manualId);if(!manual)return null;
