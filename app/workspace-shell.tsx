@@ -53,7 +53,7 @@ export function WorkspaceShell({profile,language,tab,unread,demo,onNavigate,onSi
     document.addEventListener('keydown',keyboard);
     return ()=>{document.removeEventListener('pointerdown',dismiss);document.removeEventListener('keydown',keyboard);};
   },[account]);
-  return <div className={'workspace-layout'+(profile.role==='manager'?' manager-layout':'')}>
+  return <div className={'workspace-layout'+(profile.role==='manager'?' manager-layout':' employee-layout')}>
     <header className="workspace-topbar"><div className="workspace-heading">
       <Brand compact/>
     </div><div className="workspace-topright">{demo&&<span className="badge demo shell-demo">{t('demo')}</span>}

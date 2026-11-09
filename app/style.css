@@ -258,9 +258,10 @@ footer { color:var(--muted); font-size:.8rem; text-align:center; padding:8px; }
 .delivery-history small {font-size:.78rem;color:#64748b;}
 .notification-count {display:inline-grid;place-items:center;min-width:21px;height:21px;border-radius:50%;background:#154fd2;color:white;font-size:.72rem;}
 .workspace-layout {min-height:100dvh;}
-.manager-layout {background:#dce4ee;--line:#c6d2e1;}
-.manager-layout .workspace-topbar,.manager-layout .staff-bottom {background:#edf2f8;}
-.manager-workspace .panel {background:#edf2f8;}
+.manager-layout,.employee-layout {background:#dce4ee;--line:#c6d2e1;}
+.manager-layout .workspace-topbar,.manager-layout .staff-bottom,.employee-layout .workspace-topbar,.employee-layout .staff-bottom {background:#edf2f8;}
+.manager-workspace .panel,.staff-workspace .panel {background:#edf2f8;}
+.employee-layout .staff-bottom button:not([aria-current="page"]) {background:transparent;}
 .manager-workspace .manual-list-screen {min-height:calc(100dvh - 12rem);align-content:start;}
 .manual-library-disclosure {margin-top:12px;}
 .manual-library-disclosure>summary {cursor:pointer;color:#2d4667;font-weight:700;}
