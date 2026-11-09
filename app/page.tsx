@@ -311,7 +311,6 @@ export default function BridgeWork() {
         {busy && !searching && <p className="busy" role="status">{t('searching').replace(/…$/,'')}<PendingDots/></p>}
         {tab === 'home' && !manager && <>
           {!consultOpen&&<section className="panel flow staff-hero"><p className="eyebrow">{data.profile.companyName||siteName(site)}</p><h2>{t('hero')}</h2><button onClick={()=>{setConsultOpen(true);setConsultationStage('urgency');setQuery('');setPhoto(undefined);setResults(undefined);setManualId('');}}>{{ja:'困りごとを相談',en:'Get help at work',vi:'Hỏi về khó khăn trong công việc'}[language]}</button></section>}
-          {!consultOpen&&<ManualInbox deliveries={deliveries} manuals={manuals} language={language} busy={busy} onOpen={readManual}/>}
           {consultOpen&&<div className="screen-title"><button type="button" className="screen-back" disabled={busy} aria-label={{ja:'戻る',en:'Back',vi:'Quay lại'}[language]} onClick={()=>{
             if(manual)setManualId('');else if(results)setResults(undefined);
             else if(consultationStage==='urgency')setConsultOpen(false);
@@ -359,7 +358,6 @@ export default function BridgeWork() {
           </form>}
           {consultOpen&&(results||searching)&&<button className="secondary direct-contact" type="button" disabled={busy||!query.trim()} onClick={()=>ask()}>{t('send')} →</button>}
           </>}
-          {!consultOpen&&manuals.length>0&&<section className="panel flow"><h2>{{ja:'もう一度見る',en:'Open a guide again',vi:'Xem lại hướng dẫn'}[language]}</h2>{manuals.slice(0,2).map(item=><button className="secondary" key={item.id} onClick={()=>readManual(item)}>{(item.translations[language]??item.content).title}</button>)}</section>}
         </>}
         {tab === 'cases' && <>
           <section className={'panel flow '+(question?'case-list-with-detail':'')}>
