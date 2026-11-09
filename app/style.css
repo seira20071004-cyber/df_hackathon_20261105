@@ -37,7 +37,7 @@ ul { padding-left:1.35rem; list-style:disc; }
 .routing-card strong,.routing-card small { display:block; }
 .routing-card>span:first-child { font-size:1.45rem; }
 .routing-urgent { background:#fff0f0; border-color:#e9a3a3; color:#981f27; }
-.routing-category,.routing-rules { background:#ebf9f3; border-color:#a7d5c0; color:#145e48; }
+.routing-category { background:#ebf9f3; border-color:#a7d5c0; color:#145e48; }
 .emergency-call { font-weight:750; text-decoration:underline; }
 .urgent-badge { background:#ffe5e5; color:#961d26; }
 .case-badges { display:grid; gap:3px; justify-items:end; }
@@ -258,6 +258,13 @@ footer { color:var(--muted); font-size:.8rem; text-align:center; padding:8px; }
 .delivery-history small {font-size:.78rem;color:#64748b;}
 .notification-count {display:inline-grid;place-items:center;min-width:21px;height:21px;border-radius:50%;background:#154fd2;color:white;font-size:.72rem;}
 .workspace-layout {min-height:100dvh;}
+.manager-layout {background:#dce4ee;--line:#c6d2e1;}
+.manager-layout .workspace-topbar,.manager-layout .staff-bottom {background:#edf2f8;}
+.manager-workspace .panel {background:#edf2f8;}
+.manager-workspace .manual-list-screen {min-height:calc(100dvh - 12rem);align-content:start;}
+.manual-library-disclosure {margin-top:12px;}
+.manual-library-disclosure>summary {cursor:pointer;color:#2d4667;font-weight:700;}
+.manual-library-disclosure[open]>summary {margin-bottom:12px;}
 .workspace-topbar {height:76px;position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px clamp(16px,3vw,40px);background:#fff;border-bottom:1px solid var(--line);}
 .workspace-heading,.workspace-topright {display:flex;align-items:center;gap:18px;min-width:0;}
 .shell-icon {width:44px;height:44px;min-width:44px;padding:0;border:1px solid #dde5f0;background:#fff;color:#25456e;border-radius:12px;}

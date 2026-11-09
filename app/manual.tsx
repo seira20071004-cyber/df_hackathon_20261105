@@ -119,12 +119,13 @@ const errors: Record<string,string> = {
   ,'generation-timeout':'生成が時間内に完了しませんでした。再生成できます。'
   ,'review-required':'品質検証または情報確認のため保留しています。下の確認事項を参照してください。'
 };
-export function ManualReview({manual, questions, busy, ai, regenerate, save,saveProgram,answer,changeState,stats,staff,saveAccess,sourceAction}: {
+export function ManualReview({manual, questions, busy, ai, regenerate, save,saveProgram,answer,changeState,stats,staff,saveAccess,sourceAction,privacyOverride}: {
   manual: Manual; questions: Question[]; busy: boolean; ai: boolean;
   staff:StaffRecipient[];saveAccess:(access:ManualAccess)=>void;sourceAction:(action:SourceAction)=>void;
   regenerate: (imagesOnly:boolean) => void;
   save: (content:ManualContent,publish:boolean,edits?:ManualEdits) => void;
   saveProgram:(program:ManualProgram,publish:boolean,confirmed:boolean,applicability?:ManualApplicability)=>void;
+  privacyOverride?:()=>void;
   answer:(answers:{questionId:string;answer:string}[])=>void;
   changeState:(mode:'hold'|'unpublish'|'reject'|'archive')=>void;
   stats?:{uses:number;resolved:number;unresolved:number};
@@ -153,7 +154,7 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
     </div>
     {(state==='failed'||state==='held')&&manual.generation?.error&&<p className="notice">{errors[manual.generation.error]??errors['provider-error']}</p>}
     {manual.publishedSnapshot&&!manual.publicationSuppressed&&<p className="notice">編集中の変更は未公開です。スタッフには承認済みの版 {manual.publishedSnapshot.revision??1} を表示しています。</p>}
-    {manual.security&&<div className="notice"><strong>機密情報の検査</strong><p>{manual.security.inspection.provider==='google-dlp'?'Google Sensitive Data Protection':'ローカル簡易検査（検出は完全ではありません）'} · {manual.security.inspection.available?'検査済み':'検査を完了できませんでした・公開保留'}</p>
+    {manual.security&&<div className="notice"><strong>機密情報の検査</strong><p>{manual.security.inspection.provider==='google-dlp'?'Google Sensitive Data Protection':'ローカル簡易検査（検出は完全ではありません）'} · {manual.security.override?'管理者の目視確認で公開':manual.security.inspection.available?'検査済み':'検査を完了できませんでした・公開保留'}</p>
       {manual.security.inspection.findings.length>0&&<p>要確認：{manual.security.inspection.findings.map(finding=>`${finding.type} (${finding.count})`).join('、')}。実際の値は検査記録に残しません。</p>}</div>}
     {manual.generation && !generating && ['queued','analyzing','checking_gaps','writing','validating','illustrating'].includes(state ?? '') &&
       <p className="notice">生成が中断された可能性があります。再生成して続行できます。</p>}
@@ -223,18 +224,20 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
       </section>
     </div>
     {!generating && (editing ? manual.program?<ProgramEditor key={'editor-'+manual.id+manual.updatedAt} manual={manual} busy={busy} onSave={saveProgram}/>:<ManualEditor key={'legacy-editor-'+manual.id + manual.updatedAt} manual={manual} busy={busy} save={save}/> :
-      hasContent&&<ReviewApproval key={'approval-'+manual.id+manual.updatedAt} manual={manual} busy={busy} onEdit={()=>setEditing(true)} save={save} saveProgram={saveProgram}/>)}
+      hasContent&&<ReviewApproval key={'approval-'+manual.id+manual.updatedAt+Boolean(privacyOverride)} manual={manual} busy={busy} onEdit={()=>setEditing(true)} save={save} saveProgram={saveProgram} privacyOverride={privacyOverride}/>)}
     </>}
     {Boolean(manual.audit?.length)&&<details className="pipeline-report"><summary>編集・承認履歴</summary><ul>{[...manual.audit!].reverse().map((entry,index)=><li key={index}>v{entry.revision} · {new Date(entry.at).toLocaleString('ja-JP')} · {entry.actor} · {entry.action} · {entry.changes.join('、')}</li>)}</ul></details>}
   </section>;
 }
 
-function ReviewApproval({manual,busy,onEdit,save,saveProgram}: {manual:Manual; busy:boolean; onEdit:()=>void; save:(content:ManualContent,publish:boolean)=>void;saveProgram:(program:ManualProgram,publish:boolean,confirmed:boolean,applicability?:ManualApplicability)=>void}) {
+function ReviewApproval({manual,busy,onEdit,save,saveProgram,privacyOverride}: {manual:Manual; busy:boolean; onEdit:()=>void; save:(content:ManualContent,publish:boolean)=>void;saveProgram:(program:ManualProgram,publish:boolean,confirmed:boolean,applicability?:ManualApplicability)=>void;privacyOverride?:()=>void}) {
   const [checked,setChecked] = useState(false);
   return <div className="review-approval">
-    <label className="check"><input type="checkbox" checked={checked} onChange={event=>setChecked(event.target.checked)}/>会話・追加情報との一致、作業条件、必要な作業権限を確認</label>
+    <label className="check"><input type="checkbox" checked={checked} onChange={event=>setChecked(event.target.checked)}/>{privacyOverride?'本文と画像に、共有してはいけない情報がないことを確認しました':'会話・追加情報との一致、作業条件、必要な作業権限を確認'}</label>
     <div className="actions"><button className="secondary" disabled={busy} onClick={onEdit}>編集する</button>
-      <button disabled={busy || !checked || manual.status==='published' || manual.reviewState==='awaiting_answers' || Boolean(manual.pipeline && ['pending','blocked'].includes(manual.pipeline.verification))} onClick={()=>manual.program?saveProgram(manual.program,true,true):save(manual.content,true)}>✓ 確認済にする</button></div>
+      <button disabled={busy || !checked || manual.status==='published' || manual.reviewState==='awaiting_answers' || Boolean(manual.pipeline && ['pending','blocked'].includes(manual.pipeline.verification))}
+        onClick={()=>privacyOverride?privacyOverride():manual.program?saveProgram(manual.program,true,true):save(manual.content,true)}>
+        {privacyOverride?'本文・画像を目視確認して公開する':'✓ 確認済にする'}</button></div>
   </div>;
 }
 

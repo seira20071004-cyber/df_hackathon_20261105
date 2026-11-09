@@ -8,7 +8,13 @@ export function releasedManual(manual:Manual):Manual|undefined{
  const released=manual.status==='published'?manual:manual.publishedSnapshot;
  if(!released||released.organizationId!==manual.organizationId||released.siteId!==manual.siteId||released.id!==manual.id||released.status!=='published'||!released.approvedBy)return;
  if(!publishableAccess(released))return;
- if(process.env.BRIDGE_DEMO!=='true'&&(!released.security?.inspection?.complete||released.security.inspection.findings.length||!released.security.inspection.available||released.security.contentHash!==publicationHash(released)))return;
+ if(process.env.BRIDGE_DEMO!=='true'){
+  const security=released.security;
+  if(!security||security.contentHash!==publicationHash(released))return;
+  const clean=security.inspection.complete&&security.inspection.available&&!security.inspection.findings.length;
+  const overridden=security.override?.by===released.approvedBy&&security.override?.at===released.approvedAt&&Boolean(released.approvedAt);
+  if(!clean&&!overridden)return;
+ }
  return released;
 }
 export function preservePublication(previous:Manual|undefined,next:Manual):Manual{

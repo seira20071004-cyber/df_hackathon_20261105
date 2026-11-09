@@ -1,4 +1,5 @@
 import type {Language} from '../lib/model';
+import type {ReactNode} from 'react';
 
 export type ConsultationStage='urgency'|'category'|'urgent'|'people'|'rules'|'work';
 const hr={email:'hr@example.com',phone:'03-0000-0000'};
@@ -9,13 +10,16 @@ const labels={
 };
 export function ConsultationRouting({stage,language,contact,onSelect}:{stage:ConsultationStage;language:Language;contact?:{contact:string;instructions:string};onSelect:(stage:ConsultationStage)=>void}){
   const t=labels[language];
-  function card(next:ConsultationStage,icon:string,title:string,description:string){
+  function card(next:ConsultationStage,icon:ReactNode,title:string,description:string){
     return <button type="button" className={'routing-card routing-'+next} onClick={()=>onSelect(next)}>
       <span aria-hidden="true">{icon}</span><span><strong>{title}</strong><small>{description}</small></span><span aria-hidden="true">›</span>
     </button>;
   }
   if(stage==='urgency')return <section className="panel flow"><div className="eyebrow">1 / 2</div><h2>{t.urgency}</h2>{card('urgent','⚠',t.urgent,t.urgentHelp)}{card('category','✓',t.normal,t.normalHelp)}</section>;
-  if(stage==='category')return <section className="panel flow"><div className="eyebrow">2 / 2</div><h2>{t.category}</h2>{card('people','♧',t.people,t.peopleHelp)}{card('rules','▤',t.rules,t.rulesHelp)}{card('work','⚙',t.work,t.workHelp)}</section>;
+  if(stage==='category')return <section className="panel flow"><div className="eyebrow">2 / 2</div><h2>{t.category}</h2>
+    {card('people',<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 5v1"/></svg>,t.people,t.peopleHelp)}
+    {card('rules','▤',t.rules,t.rulesHelp)}{card('work','⚙',t.work,t.workHelp)}
+  </section>;
   if(stage==='urgent'){
     const number=contact?.contact.trim();
     return <section className="panel flow safety-card"><h2>{t.safety}</h2><h3>{t.contact}</h3>

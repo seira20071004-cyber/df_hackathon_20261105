@@ -57,12 +57,12 @@ export const actionSchema = z.discriminatedUnion('action', [
   z.object({action:z.literal('reportManual'),...record,version:z.string().max(40),reason:z.enum(['outdated','incorrect','unhelpful'])}),
   z.object({action:z.literal('manualState'),...record,version:z.string().max(40),mode:z.enum(['hold','unpublish','reject','archive'])}),
   z.object({action:z.literal('manualAccess'),...record,version:z.string().max(40),access:accessPolicySchema}),
-  z.object({action:z.literal('saveProgram'),...record,version:z.string().max(40),program:programSchema,applicability:manualApplicabilitySchema.optional(),publish:z.boolean(),confirmPermissions:z.boolean().default(false)}),
+  z.object({action:z.literal('saveProgram'),...record,version:z.string().max(40),program:programSchema,applicability:manualApplicabilitySchema.optional(),publish:z.boolean(),confirmPermissions:z.boolean().default(false),overridePrivacy:z.literal(true).optional()}),
   z.object({action:z.literal('manualSession'),...record,version:z.string().max(40),runId:z.uuid(),event:z.enum(['start','resolved','unresolved']),
     path:z.array(z.string().max(80)).max(24),text:z.string().max(3000).optional(),language:z.enum(languages)}),
   z.object({action: z.literal('regenerateManual'), ...record, version: z.string().max(40), imagesOnly: z.boolean()}),
   z.object({action: z.literal('saveManual'), ...record, content: manualContent, publish: z.boolean(), version: z.string().max(40),
-    stepSources:z.array(z.number().int().min(-1).max(11)).max(12).optional(), figures:z.array(figureSchema).max(12).optional()})
+    stepSources:z.array(z.number().int().min(-1).max(11)).max(12).optional(), figures:z.array(figureSchema).max(12).optional(),overridePrivacy:z.literal(true).optional()})
 ]);
 export type Action = z.infer<typeof actionSchema>;
 export class ApiError extends Error {
@@ -470,7 +470,8 @@ export async function execute(profile: Profile, input: Action) {
     const metadata=input.applicability?{applicability:input.applicability,consultationType:input.applicability.category}:{};
     const candidate={...previous,...metadata,program,content};
     const inspection=await publicationInspection(publicationPayload({...candidate,translations,programTranslations,languages:['ja',...Object.keys(programTranslations) as Language[]]}));
-    if(input.publish&&!safeToPublish(inspection))throw new ApiError(400,'privacy-review');
+    const override=input.publish&&!safeToPublish(inspection)&&input.overridePrivacy===true;
+    if(input.publish&&!safeToPublish(inspection)&&!override)throw new ApiError(400,'privacy-review');
     const values=input.publish?await embedding(semanticText(candidate),'RETRIEVAL_DOCUMENT'):null;
     return mutate(profile,siteId,'manuals',input.id,manual=>{
       if(!manual||manual.updatedAt!==input.version)throw new ApiError(409,'stale-manual');if(generationRunning(manual))throw new ApiError(409,'generation-running');
@@ -482,7 +483,8 @@ export async function execute(profile: Profile, input: Action) {
         imageUrls:sameSteps?manual.imageUrls:[],figures:sameSteps?manual.figures??[]:[],
         ...(manual.pipeline&&changed?{pipeline:{...manual.pipeline,verification:'edited' as const,issues:[]}}:{}),
         audit:[...(manual.audit??[]),{revision,at,actor:profile.id,action:input.publish?'published' as const:'edited' as const,changes:changed?['ブロック構成・内容を編集']:applicabilityChanged?['分類・適用条件を編集']:['公開状態を確認']}].slice(-30)};
-        next.security={inspection,contentHash:publicationHash(next),checkedAt:at};
+        next.security={inspection,contentHash:publicationHash(next),checkedAt:at,...(override?{override:{by:profile.id,at}}:{})};
+        if(override)next.audit?.at(-1)?.changes.push('機密検査の保留を管理者確認で解除');
         if(values)next.embedding={model:process.env.GEMINI_EMBEDDING_MODEL!,hash:semanticHash(candidate),values};else delete next.embedding;
       if(Buffer.byteLength(JSON.stringify(next))>950_000)throw new ApiError(400,'manual-too-large');return next;
     });
@@ -529,7 +531,8 @@ export async function execute(profile: Profile, input: Action) {
     }));
   }
   const inspection=await publicationInspection(publicationPayload({...previous,content:input.content,translations,figures,imageUrls:assets.images}));
-  if(input.publish&&!safeToPublish(inspection))throw new ApiError(400,'privacy-review');
+  const override=input.publish&&!safeToPublish(inspection)&&input.overridePrivacy===true;
+  if(input.publish&&!safeToPublish(inspection)&&!override)throw new ApiError(400,'privacy-review');
   return mutate(profile, siteId, 'manuals', input.id, manual => {
     if (!manual || !isScoped(profile, manual)) throw new ApiError(404, 'not-found');
     if (manual.updatedAt !== input.version) throw new ApiError(409, 'stale-manual');
@@ -545,7 +548,8 @@ export async function execute(profile: Profile, input: Action) {
         {state:'failed', error:'content-changed', attemptId:randomUUID(), startedAt:date()},
       languages: ['ja', ...Object.keys(translations) as Language[]],
       status: input.publish ? 'published' : 'draft', approvedBy: input.publish ? profile.id : null, updatedAt: date()};
-    next.security={inspection,contentHash:publicationHash(next),checkedAt:at};
+    next.security={inspection,contentHash:publicationHash(next),checkedAt:at,...(override?{override:{by:profile.id,at}}:{})};
+    if(override)next.audit?.at(-1)?.changes.push('機密検査の保留を管理者確認で解除');
     if(Buffer.byteLength(JSON.stringify(next))>950_000)throw new ApiError(400,'manual-too-large');
     return next;
   });

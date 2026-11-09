@@ -30,6 +30,12 @@ test('published snapshots keep approved text fixed, suppress drafts and reject t
  for(const key of ['security','clarification','publishedSnapshot','audit','extraction','evidence','pipeline','embedding'])assert.equal(publicManual(draft.publishedSnapshot)[key],undefined);
  process.env.BRIDGE_DEMO='false';assert.equal(releasedManual(manual),undefined);
  const checked={...manual,security:{inspection:{provider:'google-dlp',available:true,complete:true,findings:[]},contentHash:publicationHash(manual),checkedAt:'now'}};assert.ok(releasedManual(checked));assert.equal(publicationHash({...checked,content:Object.fromEntries(Object.entries(checked.content).reverse())}),publicationHash(checked));assert.equal(releasedManual({...checked,content:{...checked.content,title:'tampered'}}),undefined);
+ const unavailable={...checked,approvedAt:'approval-time',security:{...checked.security,inspection:{...checked.security.inspection,available:false,complete:false}}};
+ assert.equal(releasedManual(unavailable),undefined);
+ const overridden={...unavailable,security:{...unavailable.security,override:{by:manual.approvedBy,at:unavailable.approvedAt}}};
+ assert.ok(releasedManual(overridden));
+ assert.equal(releasedManual({...overridden,approvedAt:'other-approval'}),undefined);
+ assert.equal(releasedManual({...overridden,content:{...overridden.content,title:'tampered'}}),undefined);
  }finally{process.env=previous;}
 });
 test('shared quota transition bounds per-minute and concurrent AI work and expires leases',()=>{

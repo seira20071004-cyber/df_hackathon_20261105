@@ -168,7 +168,7 @@ export default function BridgeWork() {
   const manual = manuals.find(row => row.id === manualId);
   const chatPeer=question&&(manager?data?.staff.find(person=>person.id===question.employeeId)?.name:question.assigneeName);
   const reviewItems=manuals.filter(row=>row.status===manualStatus&&(row.kind==='faq')===faqOnly);
-  const reviewManual=reviewItems.find(row=>row.id===manualId)??reviewItems[0];
+  const reviewManual=reviewItems.find(row=>row.id===manualId);
   const deliveries=data?.deliveries.filter(row=>row.siteId===site) ?? [];
   const unread=manager?0:deliveries.filter(row=>!row.readAt).length;
   const send=useCallback(<T,>(payload:object)=>request<T>(token,{siteId:site,...payload}),[request,token,site]);
@@ -302,7 +302,7 @@ export default function BridgeWork() {
     </button>)}</div> : <p className="empty">{t('empty')}</p>;
   }
 
-  return <WorkspaceShell profile={data.profile} language={language} tab={tab} unread={unread} demo={data.demo} busy={busy||listening} onNavigate={changeTab} onSignOut={signOut}>
+  return <WorkspaceShell profile={data.profile} language={language} tab={tab} unread={unread} demo={data.demo} busy={busy||listening} onNavigate={next=>{if(manager&&next==='manuals')setManualId('');changeTab(next);}} onSignOut={signOut}>
         {data.aiFixtures&&<p className="notice" role="status">{{ja:'架空のデモ · AIは模擬応答です',en:'Fictional demo · Simulated AI responses',vi:'Dữ liệu mẫu · Phản hồi AI mô phỏng'}[language]}</p>}
         {tab==='settings'&&<Settings profile={data.profile} language={language} site={site} busy={busy||listening} onLanguage={changeLanguage} onSite={changeSite}/>}
         {tab==='settings'&&!data.demo&&<form className="panel flow" onSubmit={event=>{event.preventDefault();const name=String(new FormData(event.currentTarget).get('displayName')??'');run(async()=>{await request(token,{action:'profileName',name});await refresh(token);});}}><label>{{ja:'表示名',en:'Display name',vi:'Tên hiển thị'}[language]}<input key={data.profile.name} name="displayName" defaultValue={data.profile.name} required maxLength={100}/></label><button disabled={busy}>{{ja:'表示名を保存',en:'Save display name',vi:'Lưu tên hiển thị'}[language]}</button></form>}
@@ -421,8 +421,8 @@ export default function BridgeWork() {
         </>}
         {tab === 'manuals' && <>
           {manager ? <>
-            {!faqOnly&&<DocumentLibrary key={site} site={site} demo={data.demo} busy={busy} send={send} download={downloadSource} openManual={async guide=>{await refresh(token);setManualStatus('draft');setManualId(guide.id);}}/>}
-            <section className="panel flow">
+            {!reviewManual&&<section className="panel flow manual-list-screen">
+              <span className="eyebrow">ステップ 1 / 2</span>
               <h2>{faqOnly?'FAQの管理':'マニュアルの管理'}</h2>
               <div className="actions" role="group" aria-label="ナレッジの種類">
                 <button type="button" className={faqOnly?'secondary':''} aria-pressed={!faqOnly} onClick={()=>{setFaqOnly(false);setManualId('');}}>業務マニュアル</button>
@@ -434,8 +434,9 @@ export default function BridgeWork() {
                   {status==='draft' ? '未確認' : '確認済'}<span>{manuals.filter(row=>row.status===status&&(row.kind==='faq')===faqOnly).length}</span>
                 </button>)}
               </div>
-              {reviewManual ? <label className="manual-picker">{faqOnly?'FAQを選択':'マニュアルを選択'}
-                <select value={reviewManual.id} onChange={event=>setManualId(event.target.value)}>
+              {reviewItems.length>0 ? <label className="manual-picker">{faqOnly?'FAQを選択':'マニュアルを選択'}
+                <select value="" onChange={event=>{setError('');setManualId(event.target.value);}}>
+                  <option value="" disabled>一覧から選択してください</option>
                   {reviewItems.map(row=>{
                     const source=questions.find(question=>row.sourceQuestionIds.includes(question.id));
                     const title=hasManualContent(row)?row.content.title:(source?.japaneseText||source?.originalText||'相談からの下書き').replace(/\s+/g,' ').slice(0,80);
@@ -443,10 +444,17 @@ export default function BridgeWork() {
                   })}
                 </select>
               </label> : <p className="empty">{t('empty')}</p>}
-            </section>
+              {!faqOnly&&<details className="manual-library-disclosure"><summary>企業マニュアル・PDFの取り込み</summary><DocumentLibrary key={site} site={site} demo={data.demo} busy={busy} send={send} download={downloadSource} openManual={async guide=>{await refresh(token);setManualStatus('draft');setManualId(guide.id);}}/></details>}
+            </section>}
+            {reviewManual&&<div className="screen-title manual-detail-navigation"><button type="button" className="secondary" disabled={busy} onClick={()=>{setManualId('');setError('');}}>‹ 一覧に戻る</button><span className="eyebrow">ステップ 2 / 2</span></div>}
             {reviewManual?.status==='published' && <ManualSend key={reviewManual.id+reviewManual.updatedAt} manual={reviewManual} staff={data.staff} deliveries={deliveries} busy={busy}
               onSend={async employeeIds=>{await send({action:'sendManual',id:reviewManual.id,version:reviewManual.updatedAt,employeeIds});await refresh(token);}}/>}
             {reviewManual && <ManualReview key={reviewManual.id} manual={reviewManual} questions={questions} busy={busy} ai={data.ai}
+              privacyOverride={error==='privacy-review'?()=>run(async()=>{
+                const publish={id:reviewManual.id,version:reviewManual.updatedAt,publish:true,overridePrivacy:true};
+                await send(reviewManual.program?{...publish,action:'saveProgram',program:reviewManual.program,confirmPermissions:true}:{...publish,action:'saveManual',content:reviewManual.content});
+                setManualStatus('published');await refresh(token);
+              }):undefined}
               staff={data.staff} saveAccess={access=>run(async()=>{await send({action:'manualAccess',id:reviewManual.id,version:reviewManual.updatedAt,access});setManualStatus('draft');setManualId(reviewManual.id);await refresh(token);})}
               sourceAction={action=>run(async()=>{await send({...action,id:reviewManual.id,version:reviewManual.updatedAt});await refresh(token);})}
               stats={data.manualStats?.[reviewManual.id]}

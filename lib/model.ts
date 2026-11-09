@@ -82,7 +82,7 @@ export interface Manual {
   feedback?:{by:string;version:string;reason:'outdated'|'incorrect'|'unhelpful';at:string}[];
   publishedSnapshot?:Manual;
   publicationSuppressed?:boolean;
-  security?:{contentHash:string;inspection:import('./security-content').Inspection;checkedAt:string};
+  security?:{contentHash:string;inspection:import('./security-content').Inspection;checkedAt:string;override?:{by:string;at:string}};
   consultationType?:import('./adaptive').ConsultationType;
   applicability?:import('./adaptive').ManualApplicability;
   riskLevel?:import('./adaptive').Risk;
