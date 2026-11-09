@@ -158,6 +158,7 @@ export interface ManualUse {id:string;organizationId:string;siteId:string;manual
 export type StaffRecipient=Pick<Profile,'id'|'name'|'siteIds'>;
 export interface Workspace {
   profile: Profile;
+  organizationLanguages?:Language[];
   demo: boolean;
   aiFixtures?:boolean;
   ai: boolean;

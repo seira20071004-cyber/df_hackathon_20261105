@@ -18,7 +18,7 @@ import {applicableIds,compatibleCodes,evaluationSchema,manualApplicabilitySchema
 import {classifyConsultation,consultationPhotoSchema,observeConsultationPhoto} from './consultation';
 import {cosine,semanticHash,semanticText} from './semantic-search';
 import { isScoped, languageNames, languages, mayReadManual, mayReadQuestion, mayReuse, topic, type Language, type Manual, type Match, type Profile, type Question } from './model';
-import { deliverManual, isDemo, list, mutate,openPublishedManual,recordManualSession, resolveWithManual, setLanguage, setDisplayName, slug, staffRecipients, siteManagers, siteSafety } from './storage';
+import { deliverManual, isDemo, list, mutate,openPublishedManual,recordManualSession, resolveWithManual, setLanguage, setDisplayName, slug, staffRecipients, siteManagers, siteSafety, organizationLanguages } from './storage';
 
 const text = z.string().trim().min(1).max(3000);
 const intake=z.array(z.object({field:z.enum(['target','symptom','situation','error','attempt','result','missing']),text:z.string().trim().min(1).max(500),prompt:z.string().trim().min(1).max(200).optional(),unknown:z.literal(true).optional()}).strict()).max(3);
@@ -94,7 +94,7 @@ export async function workspace(profile: Profile) {
         received.some(delivery=>delivery.manualId===manual.id) ||
         legacyReferences.some(reference => reference.id === manual.id))).map(staffManual)};
   }));
-  return {profile, demo: isDemo(), ai: aiConfigured(),aiFixtures:isDemo()&&process.env.BRIDGE_AI_FIXTURES==='true',
+  return {profile, organizationLanguages:await organizationLanguages(profile), demo: isDemo(), ai: aiConfigured(),aiFixtures:isDemo()&&process.env.BRIDGE_AI_FIXTURES==='true',
     manualStats:sites.flatMap(site=>site.uses).reduce<Record<string,{uses:number;resolved:number;unresolved:number}>>((stats,use)=>{
       const row=stats[use.manualId]??={uses:0,resolved:0,unresolved:0};row.uses++;if(use.outcome==='resolved')row.resolved++;if(use.outcome==='unresolved')row.unresolved++;return stats;},{}),
     staff:await staffRecipients(profile),managers:profile.role==='manager'?await siteManagers(profile):[],deliveries:sites.flatMap(site=>site.deliveries).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)),

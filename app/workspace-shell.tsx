@@ -1,7 +1,8 @@
 'use client';
 import {useEffect,useRef,useState,type ReactNode} from 'react';
 import {copy} from '../lib/copy';
-import {languageNames,languages,type Language,type Profile} from '../lib/model';
+import {type Language,type Profile} from '../lib/model';
+import {LanguageSelector,OrganizationLanguages} from './language-selector';
 
 export type AppTab='home'|'cases'|'manuals'|'members'|'settings';
 export function Brand({compact=false}:{compact?:boolean}) {
@@ -29,8 +30,8 @@ function AccountFields({profile,language}:{profile:Profile;language:Language}) {
     <div><dt>{text.company}</dt><dd>{profile.companyName || text.unset}</dd></div>
     <div><dt>{text.role}</dt><dd>{copy(language,profile.role)}</dd></div></dl>;
 }
-export function WorkspaceShell({profile,language,tab,unread,demo,onNavigate,onSignOut,busy,children}:{
-  profile:Profile;language:Language;tab:AppTab;unread:number;demo:boolean;onNavigate:(tab:AppTab)=>void;onSignOut:()=>void;busy:boolean;children:ReactNode;
+export function WorkspaceShell({profile,language,tab,unread,demo,onNavigate,onSignOut,busy,children,organizationLanguages}:{
+  profile:Profile;language:Language;tab:AppTab;unread:number;demo:boolean;onNavigate:(tab:AppTab)=>void;onSignOut:()=>void;busy:boolean;children:ReactNode;organizationLanguages?:Language[];
 }) {
   const [account,setAccount]=useState(false);
   const accountButton=useRef<HTMLButtonElement>(null),popover=useRef<HTMLDivElement>(null);
@@ -63,7 +64,9 @@ export function WorkspaceShell({profile,language,tab,unread,demo,onNavigate,onSi
           <button className="link" disabled={busy} onClick={()=>{setAccount(false);onSignOut();}}>{t('signout')}</button>
         </div>}
       </div></div></header>
-    <main className={'content flow workspace-content '+(profile.role==='employee'?'staff-workspace':'manager-workspace')}>{children}</main>
+    <main className={'content flow workspace-content '+(profile.role==='employee'?'staff-workspace':'manager-workspace')}>
+      <OrganizationLanguages.Provider value={organizationLanguages??['ja','en']}>{children}</OrganizationLanguages.Provider>
+    </main>
     <nav className="staff-bottom" aria-label={text.navigation}>
       {tabs.map(item=><button key={item} type="button" aria-current={tab===item?'page':undefined} onClick={()=>navigate(item)}>
         <Icon name={item}/>{name(item)}{item==='manuals'&&unread>0&&<span className="notification-count">{unread}</span>}
@@ -75,7 +78,7 @@ export function Settings({profile,language,site,busy,onLanguage,onSite}:{profile
   const text=labels[language];
   return <section className="panel flow settings-panel"><h2>{text.settings}</h2>
     <section><h3>{text.account}</h3><AccountFields profile={profile} language={language}/></section>
-    <label>{text.language}<select value={language} disabled={busy} onChange={event=>onLanguage(event.target.value as Language)}>{languages.map(code=><option key={code} value={code}>{languageNames[code]}</option>)}</select></label>
+    <div>{text.language}<LanguageSelector language={language} disabled={busy} onChange={onLanguage}/></div>
     <label>{text.site}<select value={site} disabled={busy} onChange={event=>onSite(event.target.value)}>{profile.siteIds.map(id=><option value={id} key={id}>{id==='sakura'?'Sakura Building':id}</option>)}</select></label>
   </section>;
 }

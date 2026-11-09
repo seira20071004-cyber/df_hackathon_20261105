@@ -73,14 +73,14 @@ export function programContent(program:ManualProgram){
     steps:steps.length?steps:[program.blocks.map(blockText).join('\n').slice(0,500)],cautions:program.blocks.filter(block=>block.type==='warning').map(blockText),mistakes:[],checks:[]};
 }
 export function paperProgram(program:ManualProgram){
-  const words={ja:{block:'ブロック',contact:'管理者へ確認',yes:'解決した',no:'解決しない',done:'完了',warning:'注意・禁止',next:'次'},
-    en:{block:'Block',contact:'Ask your manager',yes:'Resolved',no:'Not resolved',done:'Done',warning:'Warning',next:'Next'},
-    vi:{block:'Khối',contact:'Hỏi quản lý',yes:'Đã giải quyết',no:'Chưa giải quyết',done:'Hoàn tất',warning:'Chú ý / Cấm',next:'Tiếp'}}[program.language];
-  const number=(target:string|null)=>target?words.block+' '+String(program.blocks.findIndex(block=>block.id===target)+1).padStart(2,'0'):words.contact;
+  const words={ja:{contact:'管理者へ確認',yes:'解決した',no:'解決しない',done:'完了',warning:'注意・禁止'},
+    en:{contact:'Ask your manager',yes:'Resolved',no:'Not resolved',done:'Done',warning:'Warning'},
+    vi:{contact:'Hỏi quản lý',yes:'Đã giải quyết',no:'Chưa giải quyết',done:'Hoàn tất',warning:'Chú ý / Cấm'}}[program.language];
+  const number=(target:string|null)=>target?'STEP '+String(program.blocks.findIndex(block=>block.id===target)+1).padStart(2,'0')+(program.language==='ja'?'へ':''):words.contact;
   const steps=program.blocks.map(block=>block.type==='branch'?`${block.question}\n${block.choices.map(choice=>`${choice.label} → ${number(choice.nextBlockId)}`).join('\n')}`:
     block.type==='check'?`${block.content}\n${words.yes} → ${words.done}\n${words.no} → ${number(block.failureNextBlockId)}`:
-    block.type==='warning'?`${words.warning}：${block.content}${block.nextBlockId?'\n'+words.next+'：'+number(block.nextBlockId):'\n'+words.contact}`:
-    `${blockText(block)}\n${words.next}：${number(block.nextBlockId)}`);
+    block.type==='warning'?`${words.warning}：${block.content}\n→${number(block.nextBlockId)}`:
+    `${blockText(block)}\n→${number(block.nextBlockId)}`);
   return {...programContent(program),steps,cautions:[]};
 }
 export function graphShape(program:ManualProgram){return JSON.stringify({start:program.startBlockId,blocks:program.blocks.map(block=>({id:block.id,type:block.type,next:nextIds(block),sources:block.sourceMessageIds,

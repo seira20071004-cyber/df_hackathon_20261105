@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { copy } from '../lib/copy';
-import { languageNames, languages, type Language, type Manual, type ManualContent, type ManualEdits, type Question } from '../lib/model';
+import { type Language, type Manual, type ManualContent, type ManualEdits, type Question } from '../lib/model';
+import {LanguageSelector} from './language-selector';
 import { stairRange } from '../lib/diagrams';
 import { RangeDiagram } from './range-diagram';
 import { ManualEditor } from './manual-editor';
@@ -54,10 +55,7 @@ export function ManualView({manual, language, onEvent,contextText}: {manual: Man
   </div><article ref={documentRef} className="manual-document" aria-label={t('manuals')}>
     <div className="manual-meta"><span className="manual-site"><span aria-hidden="true">▥</span>{manual.siteId === 'sakura' ? 'さくらビル' : manual.siteId}</span>
       <span className={'badge '+(manual.status === 'published' ? 'resolved' : 'active')}>{manual.status === 'published' ? t('reviewed') : t('unreviewed')}</span></div>
-    <div className="manual-languages" role="group" aria-label="Language">
-      {languages.map(code=><button type="button" key={code} aria-pressed={displayLanguage===code}
-        onClick={()=>setDisplayLanguage(code)}>{languageNames[code]}</button>)}
-    </div>
+    <LanguageSelector language={displayLanguage} onChange={setDisplayLanguage}/>
     <header className="manual-question">
       <div className="eyebrow">{t('manualQuestion')}</div>
       <h2>{content.title}</h2>

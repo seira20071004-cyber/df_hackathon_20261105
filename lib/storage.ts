@@ -39,6 +39,12 @@ export async function setDisplayName(profile:Profile,name:string){
 export async function setLanguage(profile: Profile, preferredLanguage: Profile['preferredLanguage']) {
   if (!isDemo()) await getFirestore(bridgeAdmin()).collection('users').doc(profile.id).update({preferredLanguage});
 }
+export async function organizationLanguages(profile:Profile){
+  const profiles=isDemo()?Object.values(demoProfiles):
+    (await getFirestore(bridgeAdmin()).collection('users').where('organizationId','==',profile.organizationId).select('organizationId','preferredLanguage').get()).docs.map(doc=>doc.data());
+  const used=new Set(profiles.filter(row=>row.organizationId===profile.organizationId).map(row=>row.preferredLanguage));
+  return languages.filter(code=>code==='ja'||code==='en'||used.has(code));
+}
 type Records = {sourceDocuments:import('./document-types').SourceDocument;questions: Question; manuals: Manual; manualViews: ManualView; manualDeliveries:ManualDelivery;manualUses:ManualUse};
 type Table = keyof Records;
 type DemoState = {[K in Table]: Records[K][]};
