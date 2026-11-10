@@ -145,10 +145,10 @@ nav { display:grid; gap:5px; }
 .manual-meta { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:18px 20px 12px; }
 .manual-site { display:flex; align-items:center; gap:10px; color:#243b5d; font-weight:750; }
 .manual-site > span { color:#366191; font-size:1.5rem; }
-.manual-languages { display:flex; padding:0 20px; }
-.manual-languages button { flex:1; min-width:0; padding:6px; min-height:36px; border:1px solid #bdcde4; border-radius:0; background:white; color:#263d65; font-size:.8rem; }
+.manual-languages { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); padding:0 20px; }
+.manual-languages button,.manual-languages select { width:100%; min-width:0; padding:6px; min-height:36px; border:1px solid #bdcde4; border-radius:0; background:white; color:#263d65; font-size:.8rem; }
 .manual-languages button:first-child { border-radius:7px 0 0 7px; }
-.manual-languages button:last-child { border-radius:0 7px 7px 0; }
+.manual-languages select:last-child { border-radius:0 7px 7px 0; }
 .manual-languages button[aria-pressed=true] { color:white; background:#155bdd; border-color:#155bdd; }
 .manual-question { padding:24px 20px 8px; background:white; color:var(--ink); }
 .manual-question .eyebrow { display:block; background:#e7effc; color:#253f69; padding:5px 10px; border-radius:6px; margin-bottom:12px; font-size:.84rem; letter-spacing:0; text-transform:none; }
@@ -284,6 +284,7 @@ footer { color:var(--muted); font-size:.8rem; text-align:center; padding:8px; }
 .settings-panel {width:min(100%,760px);margin:auto;gap:24px;}
 .settings-panel section {padding:18px;background:#f7f9fd;border:1px solid #e5ebf4;border-radius:12px;}
 .settings-panel select {width:100%;}
+.settings-panel .manual-languages {padding:8px 0 0;}
 @media(max-width:620px){.workspace-topbar{height:68px;padding:10px 14px;gap:10px;}.shell-demo{display:none;}.workspace-content{padding:16px;}}
 @media print {.workspace-topbar {display:none!important;} .workspace-content{padding:0;}}
 .interactive-guide {display:grid;gap:18px;padding:16px 0;}
