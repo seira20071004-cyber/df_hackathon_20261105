@@ -197,6 +197,18 @@ export default function BridgeWork() {
     void loadPreviews();
     return ()=>{cancelled=true;};
   },[language,previewIds,previewScope,send,token]);
+  const manualPreviewScope=JSON.stringify([data?.profile.id,site,language,reviewItems.map(row=>[row.id,row.updatedAt])]);
+  const [manualPreviews,setManualPreviews]=useState<{scope:string;texts:Map<string,string|null>}>();
+  const manualPreviewTexts=manualPreviews?.scope===manualPreviewScope?manualPreviews.texts:undefined;
+  const manualPreviewIds=JSON.stringify(manager&&tab==='manuals'&&!reviewManual?reviewItems.filter(row=>!manualPreviewTexts?.has(row.id)).map(row=>row.id):[]);
+  useEffect(()=>{
+    const ids=JSON.parse(manualPreviewIds) as string[];if(!token||!ids.length)return;let cancelled=false;
+    async function load(){const translations=new Map<string,string|null>();for(let i=0;i<ids.length&&!cancelled;i+=8){
+      const manualIds=ids.slice(i,i+8);try{const result=await send<{translations:{id:string;text:string|null}[]}>({action:'manualTitlePreviews',manualIds,language});for(const row of result.translations)translations.set(row.id,row.text);}
+      catch{for(const id of manualIds)translations.set(id,null);}
+    }if(!cancelled)setManualPreviews(current=>({scope:manualPreviewScope,texts:new Map([...(current?.scope===manualPreviewScope?current.texts:[]),...translations])}));}
+    void load();return ()=>{cancelled=true;};
+  },[language,manualPreviewIds,manualPreviewScope,send,token]);
   async function downloadSource(id:string,guide?:Manual,page?:number){
     const suffix='?sourcePdf='+id+'&site='+encodeURIComponent(site)+(guide?'&manual='+encodeURIComponent(guide.id)+'&version='+encodeURIComponent(guide.updatedAt):'')+(page?'&page='+page:'');
     const credential=token===GOOGLE_SESSION?await googleSessionToken():token;
@@ -293,10 +305,10 @@ export default function BridgeWork() {
   function caseList(items: Question[]) {
     const labels={ja:{loading:'タイトルを翻訳中',failed:'タイトルを翻訳できませんでした',translated:'翻訳'},en:{loading:'Translating title',failed:'Title translation unavailable',translated:'Translated'},vi:{loading:'Đang dịch tiêu đề',failed:'Không dịch được tiêu đề',translated:'Bản dịch'}}[language];
     return items.length ? <div className="rows">{items.map(row=>{
-      const title=previewTexts?.get(row.id)||'';
-      const failed=!title&&previewTexts?.has(row.id);
+      const translated=previewTexts?.get(row.id);const title=translated||row.originalText;
+      const failed=previewTexts?.has(row.id)&&!translated;
       return <button className={'row ' + (selected === row.id ? 'selected' : '')} key={row.id} onClick={() => openCase(row.id)}>
-      <span className="tile" aria-hidden="true">◫</span><span className="row-text"><strong>{title||(failed?labels.failed:<>{labels.loading}<PendingDots/></>)}</strong>{Boolean(title)&&title!==row.originalText&&<small className="title-translation-label">{labels.translated}</small>}{failed&&<small lang={row.originalLanguage}>{row.originalText}</small>}<small>{siteName(row.siteId)} · {new Date(row.createdAt).toLocaleDateString(language)}</small></span>
+      <span className="tile" aria-hidden="true">◫</span><span className="row-text"><strong>{title}</strong>{Boolean(translated)&&title!==row.originalText&&<small className="title-translation-label">{labels.translated}</small>}{failed&&<small>{labels.failed}</small>}<small>{siteName(row.siteId)} · {new Date(row.createdAt).toLocaleDateString(language)}</small></span>
       <span className="case-badges">
         {row.route==='urgent'&&<span className="badge urgent-badge">{{ja:'緊急',en:'Urgent',vi:'Khẩn cấp'}[language]}</span>}
         {manager&&row.status==='resolved'&&pendingHistory.has(row.id)&&<span className="badge active">履歴承認待ち</span>}
@@ -445,8 +457,9 @@ export default function BridgeWork() {
                   <option value="" disabled>一覧から選択してください</option>
                   {reviewItems.map(row=>{
                     const source=questions.find(question=>row.sourceQuestionIds.includes(question.id));
-                    const title=hasManualContent(row)?row.content.title:(source?.japaneseText||source?.originalText||'相談からの下書き').replace(/\s+/g,' ').slice(0,80);
-                    return <option value={row.id} key={row.id}>{title}（{row.status==='published'?'公開済':isGenerating(row)?'生成中':row.reviewState==='awaiting_answers'?'追加質問待ち':row.generation?.error==='source-review-required'?'生成前の確認待ち':row.reviewState==='archived'?'アーカイブ済み':row.reviewState==='held'?'保留':'承認待ち'}）</option>;
+                    const original=(hasManualContent(row)?row.content.title:source?.originalText||'相談からの下書き').replace(/\s+/g,' ').slice(0,120);
+                    const title=manualPreviewTexts?.get(row.id)||original;
+                    return <option value={row.id} key={row.id}>{title}{title!==original?'（翻訳）':''}（{row.status==='published'?'公開済':isGenerating(row)?'生成中':row.reviewState==='awaiting_answers'?'追加質問待ち':row.generation?.error==='source-review-required'?'生成前の確認待ち':row.reviewState==='archived'?'アーカイブ済み':row.reviewState==='held'?'保留':'承認待ち'}）</option>;
                   })}
                 </select>
               </label> : <p className="empty">{t('empty')}</p>}

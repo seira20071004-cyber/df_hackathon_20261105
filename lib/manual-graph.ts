@@ -60,11 +60,12 @@ export function qualityIssues(program:ManualProgram,report:QualityReport){
     else if(!checks[0].supported||!checks[0].conditionsPreserved||!checks[0].safe||!checks[0].clear)issues.push(`${block.id}: ${checks[0].reason||'原文との不一致'}`);
   }return [...new Set(issues)];
 }
-export function validRunPath(program:ManualProgram,path:string[],outcome:'resolved'|'unresolved') {
+export function validRunPath(program:ManualProgram,path:string[],outcome:'resolved'|'unresolved',allowCompletedStep=false) {
   if(graphIssues(program).length||!path.length||path[0]!==program.startBlockId||new Set(path).size!==path.length)return false;
   const blocks=new Map(program.blocks.map(block=>[block.id,block]));
   for(let index=0;index<path.length;index++){const block=blocks.get(path[index]);if(!block)return false;if(index+1<path.length&&!nextIds(block).includes(path[index+1]))return false;}
-  return outcome==='unresolved'||blocks.get(path.at(-1)!)?.type==='check';
+  const last=blocks.get(path.at(-1)!);
+  return outcome==='unresolved'||last?.type==='check'||Boolean(allowCompletedStep&&last?.type==='step'&&last.nextBlockId===null);
 }
 export function blockText(block:ManualBlock){return block.type==='step'?`${block.title}：${block.content}${block.supplement?'（'+block.supplement+'）':''}`:block.type==='branch'?block.question:block.content;}
 export function programContent(program:ManualProgram){

@@ -10,6 +10,7 @@ const words={ja:{start:'マニュアルを開始',next:'次へ',back:'前へ',qu
 export function ManualGuide({manual,program,language,onEvent,contextText}:{manual:Manual;program:ManualProgram;language:Language;onEvent?:ManualEvent;contextText?:string}){
   const text=words[language];
   const [run,setRun]=useState(()=>crypto.randomUUID()),[trail,setTrail]=useState<string[]>([]),[contact,setContact]=useState(false),[done,setDone]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [finishChoice,setFinishChoice]=useState(false);
   const [overview,setOverview]=useState(false);
   const [question,setQuestion]=useState(contextText||program.title);
   const current=program.blocks.find(block=>block.id===trail.at(-1));
@@ -21,7 +22,7 @@ export function ManualGuide({manual,program,language,onEvent,contextText}:{manua
   }
   async function start(){setBusy(true);setError('');try{await onEvent?.('start',run,[],undefined,language);setTrail([program.startBlockId]);}catch{setError(text.error);}finally{setBusy(false);}}
   async function finish(event:'resolved'|'unresolved'){setBusy(true);setError('');try{await onEvent?.(event,run,trail,question,language);setDone(true);}catch{setError(text.error);}finally{setBusy(false);}}
-  function reset(){setRun(crypto.randomUUID());setTrail([]);setContact(false);setDone(false);setError('');}
+  function reset(){setRun(crypto.randomUUID());setTrail([]);setContact(false);setFinishChoice(false);setDone(false);setError('');}
   const ordinal=current?.type==='step'?program.blocks.filter(block=>block.type==='step').findIndex(block=>block.id===current.id):-1;
   const format=manual.consultationType??'unknown';
   const formats={ja:{troubleshooting:'トラブル解決',procedure:'業務手続き',work_instruction:'作業ガイド',information_support:'情報・翻訳',unknown:'マニュアル'},en:{troubleshooting:'Troubleshooting',procedure:'Procedure',work_instruction:'Work guide',information_support:'Information & translation',unknown:'Guide'},vi:{troubleshooting:'Khắc phục sự cố',procedure:'Thủ tục',work_instruction:'Hướng dẫn công việc',information_support:'Thông tin và dịch thuật',unknown:'Hướng dẫn'}}[language];
@@ -40,6 +41,9 @@ export function ManualGuide({manual,program,language,onEvent,contextText}:{manua
         <label>{text.details}<textarea rows={3} maxLength={3000} value={question} onChange={event=>setQuestion(event.target.value)} disabled={busy}/></label>
         <div className="actions"><button disabled={busy||!question.trim()} onClick={()=>finish('unresolved')}>{text.contact}</button><button className="secondary" disabled={busy} onClick={()=>setContact(false)}>{text.back}</button></div>
       </div>:
+      finishChoice?<div className="guide-block flow"><h3>{{ja:'手順を確認しましたか？',en:'Have you completed the steps?',vi:'Bạn đã hoàn thành các bước chưa?'}[language]}</h3>
+        <div className="branch-choices"><button disabled={busy} onClick={()=>finish('resolved')}>✓ {{ja:'完了',en:'Complete',vi:'Hoàn thành'}[language]}</button><button className="secondary" disabled={busy} onClick={openContact}>{text.unknown}</button></div>
+        <button className="link" disabled={busy} onClick={()=>setFinishChoice(false)}>← {text.back}</button></div>:
       !current?<div className="flow guide-start">{(manual.figures??[]).filter(figure=>figure.afterStep===-1).map(figure=><figure key={figure.id}><img src={figure.url} alt={figure.caption}/>{figure.caption&&<figcaption>{figure.caption}</figcaption>}</figure>)}
         <button disabled={busy} onClick={start}>{text.start} →</button></div>:
       <div className={'guide-block flow guide-'+current.type} aria-live="polite">
@@ -49,12 +53,12 @@ export function ManualGuide({manual,program,language,onEvent,contextText}:{manua
           {stepPictures.map(figure=><figure key={figure.id}><img className="guide-image" src={figure.url} alt={figure.caption}/>{figure.caption&&<figcaption>{figure.caption}</figcaption>}</figure>)}
           {style==='checklist'&&<label className="check"><input type="checkbox" checked={Boolean(checked[current.id])} onChange={event=>setChecked({...checked,[current.id]:event.target.checked})}/>{{ja:'この項目を確認した',en:'I checked this item',vi:'Tôi đã kiểm tra mục này'}[language]}</label>}
           {style==='approval'&&<p className="notice">{{ja:'必要な承認は職場の担当者に確認してください。',en:'Check any required approval with the designated person.',vi:'Hãy xác nhận phê duyệt cần thiết với người phụ trách.'}[language]}</p>}
-          <button disabled={busy||(style==='checklist'&&!checked[current.id])} onClick={()=>next(current.nextBlockId)}>{text.next} →</button></>:
+          <button disabled={busy||(style==='checklist'&&!checked[current.id])} onClick={()=>current.nextBlockId?next(current.nextBlockId):format==='work_instruction'?setFinishChoice(true):openContact()}>{text.next} →</button></>:
         current.type==='branch'?<><h3>{current.question}</h3><p className="muted">{text.question}</p><div className="branch-choices">{current.choices.map(choice=><button className="secondary" key={choice.id} disabled={busy} onClick={()=>next(choice.nextBlockId)}>{choice.label} →</button>)}</div></>:
         current.type==='warning'?<><h3><span aria-hidden="true">!</span> {current.severity==='stop'?'STOP':'WARNING'}</h3><p className="guide-action">{current.content}</p>
           <button disabled={busy} onClick={()=>next(current.nextBlockId)}>{current.nextBlockId?text.next:text.contact}</button></>:
-        <><h3>{current.content}</h3><div className="branch-choices"><button disabled={busy} onClick={()=>finish('resolved')}>✓ {text.solved}</button>
-          <button className="secondary" disabled={busy} onClick={()=>next(current.failureNextBlockId)}>{text.failed} →</button></div></>}
+        <><h3>{current.content}</h3><div className="branch-choices"><button disabled={busy} onClick={()=>finish('resolved')}>✓ {format==='work_instruction'?{ja:'完了',en:'Complete',vi:'Hoàn thành'}[language]:text.solved}</button>
+          <button className="secondary" disabled={busy} onClick={()=>next(current.failureNextBlockId)}>{format==='work_instruction'?text.unknown:text.failed} →</button></div></>}
         <div className="actions guide-help">{trail.length>1&&<button className="link" disabled={busy} onClick={()=>setTrail(current=>current.slice(0,-1))}>← {text.back}</button>}
           <button className="link" disabled={busy} onClick={openContact}>{text.unknown}</button></div>
       </div>}

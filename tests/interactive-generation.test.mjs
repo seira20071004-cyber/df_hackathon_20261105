@@ -2,6 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {generationContext,runInteractiveGeneration,MAX_REPAIRS,interactivePrompts} from '../lib/interactive-generation.ts';
 import {extractedChatSchema,gapSchema,programSchema,qualitySchema,graphIssues,validRunPath,graphShape,CONTACT_TEXT} from '../lib/manual-graph.ts';
+test('a work guide can record completion only at its final step',()=>{
+ const program={title:'作業',description:'',language:'ja',startBlockId:'one',blocks:[{id:'one',type:'step',title:'確認',content:'確認する',supplement:'',sourceMessageIds:['m1'],nextBlockId:'two',restricted:false,authorizationSourceMessageIds:[]},{id:'two',type:'step',title:'完了',content:'片付ける',supplement:'',sourceMessageIds:['m2'],nextBlockId:null,restricted:false,authorizationSourceMessageIds:[]}]};
+ assert.equal(validRunPath(program,['one','two'],'resolved',true),true);
+ assert.equal(validRunPath(program,['one'],'resolved',true),false);
+ assert.equal(validRunPath(program,['one','two'],'resolved'),false);
+});
 import {profile,questionFixture,factsFixture,programFixture,qualityFixture} from './interactive-fixtures.mjs';
 
 function run(overrides={}){const question=overrides.question??questionFixture();const {context}=generationContext(profile,question,overrides.answers??[]);const calls=[];

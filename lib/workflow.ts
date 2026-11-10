@@ -42,6 +42,7 @@ export const actionSchema = z.discriminatedUnion('action', [
   z.object({action:z.literal('reclassify'),...record}),
   z.object({action:z.literal('chatTranslations'),...record,messageIds:z.array(slug).min(1).max(8),language:z.enum(languages)}),
   z.object({action:z.literal('consultationPreviews'),...location,questionIds:z.array(slug).min(1).max(8),language:z.enum(languages)}),
+  z.object({action:z.literal('manualTitlePreviews'),...location,manualIds:z.array(slug).min(1).max(8),language:z.enum(languages)}),
   z.object({action:z.literal('retryTranslation'),...record,messageId:slug,language:z.enum(languages)}),
   z.object({action:z.literal('assign'),...record,managerId:slug.optional()}),
   z.object({action:z.literal('completeHandoff'),...record}),
@@ -190,7 +191,7 @@ export async function execute(profile: Profile, input: Action) {
   if(input.action==='manualSession'){
     assertRole(profile,'employee');const manual=manuals.find(row=>row.id===input.id&&mayReadManual(profile,row));
     if(!manual?.program||manual.updatedAt!==input.version)throw new ApiError(404,'not-found');
-    if(input.event!=='start'&&!validRunPath(manual.program,input.path,input.event))throw new ApiError(400,'invalid-run-path');
+    if(input.event!=='start'&&!validRunPath(manual.program,input.path,input.event,manual.consultationType==='work_instruction'))throw new ApiError(400,'invalid-run-path');
     if(input.event==='start'&&input.path.length)throw new ApiError(400,'invalid-run-path');
     const id=createHash('sha256').update(JSON.stringify([profile.id,input.runId])).digest('hex');
     const prior=(await list(profile,siteId,'manualUses')).find(row=>isScoped(profile,row)&&row.id===id&&row.employeeId===profile.id);
@@ -270,6 +271,18 @@ export async function execute(profile: Profile, input: Action) {
     const policy=await siteSafety(profile,siteId),sources=[{id:'question:'+question.id,text:question.originalText},...intakeSources(question.intakeAnswers??[]),...question.messages.slice(-10).map(row=>({id:row.id,text:row.originalText}))];
     const consultation=await classifyConsultation(sources,'ja',policy?.keywords);
     return mutate(profile,siteId,'questions',input.id,current=>{if(!current||current.messages.at(-1)?.id!==question.messages.at(-1)?.id)throw new ApiError(409,'conversation-updated');return {...current,consultation};});
+  }
+  if(input.action==='manualTitlePreviews'){
+    assertRole(profile,'manager');
+    const rows=[...new Set(input.manualIds)].map(id=>{
+      const manual=manuals.find(row=>row.id===id&&mayReadManual(profile,row));
+      if(!manual)throw new ApiError(404,'not-found');
+      const hasContent=Boolean(manual.program||(manual.content.steps.length&&!(manual.sourceQuestionIds.length&&manual.content.title==='保護済み会話の確認待ち'&&manual.content.steps.length===1&&manual.content.steps[0]==='管理者による確認が必要')));
+      const source=questions.find(row=>manual.sourceQuestionIds.includes(row.id)&&mayReadQuestion(profile,row));
+      return {id,originalText:(hasContent?manual.content.title:source?.originalText||'相談からの下書き').replace(/\s+/g,' ').slice(0,120)};
+    });
+    if(chatTranslationEnabled())return {translations:await detectedPreviews(rows,input.language,translateChatBatch)};
+    return {translations:rows.map(row=>({id:row.id,text:row.originalText}))};
   }
   if(input.action==='consultationPreviews'){
     const readable=new Map(questions.filter(row=>mayReadQuestion(profile,row)).map(row=>[row.id,row]));

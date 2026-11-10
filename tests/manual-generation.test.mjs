@@ -34,6 +34,10 @@ test('SDK pipeline, supplements, approval, sessions and escalation remain scoped
  assert.deepEqual((await api('sato',previewRequest)).translations,[{id:'bilingual-chat-test',text:'スキャナーが止まっています。'}]);
  assert.deepEqual((await api('alex',{...previewRequest,language:'en'})).translations,[{id:'bilingual-chat-test',text:'The scanner is stuck.'}]);
  await api('linh',previewRequest,404);
+ const manualPreviewRequest={action:'manualTitlePreviews',manualIds:['demo-interactive-manual'],language:'ja'};
+ assert.equal((await api('sato',manualPreviewRequest)).translations[0].id,'demo-interactive-manual');
+ await api('linh',manualPreviewRequest,403);
+ await api('sato',{...manualPreviewRequest,manualIds:['foreign-manual']},404);
  async function approve(id,answerCount=0){
   let row;for(let i=0;i<100;i++){row=(await api('sato')).manuals.find(item=>item.id===id);if(row?.protectedSource?.context?.sources.filter(source=>source.role==='manager_supplement').length===answerCount)break;await new Promise(resolve=>setTimeout(resolve,100));}
   assert.equal(row.generation.state,'held');assert.equal(row.pipeline?.verification==='passed',false);
