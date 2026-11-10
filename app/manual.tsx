@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {ChatMessages} from './chat-messages';
 import { copy } from '../lib/copy';
 import { type Language, type Manual, type ManualContent, type ManualEdits, type Question } from '../lib/model';
 import {LanguageSelector} from './language-selector';
@@ -117,8 +118,13 @@ const errors: Record<string,string> = {
   ,'generation-timeout':'生成が時間内に完了しませんでした。再生成できます。'
   ,'review-required':'品質検証または情報確認のため保留しています。下の確認事項を参照してください。'
 };
-export function ManualReview({manual, questions, busy, ai, regenerate, save,saveProgram,answer,changeState,stats,staff,saveAccess,sourceAction,privacyOverride}: {
+function ReviewConversation({question,viewerId,language,requestTranslations}:{question:Question;viewerId:string;language:Language;requestTranslations:(id:string,ids:string[])=>Promise<{translations:{id:string;text:string|null|false}[]}>}){
+  const load=useCallback((ids:string[])=>requestTranslations(question.id,ids),[question.id,requestTranslations]);
+  return <ChatMessages key={question.id+':'+language} question={question} viewerId={viewerId} language={language} requestTranslations={load}/>;
+}
+export function ManualReview({manual, questions, busy, ai, regenerate, save,saveProgram,answer,changeState,stats,staff,saveAccess,sourceAction,privacyOverride,language,viewerId,requestTranslations}: {
   manual: Manual; questions: Question[]; busy: boolean; ai: boolean;
+  language:Language;viewerId:string;requestTranslations:(id:string,ids:string[])=>Promise<{translations:{id:string;text:string|null|false}[]}>;
   staff:StaffRecipient[];saveAccess:(access:ManualAccess)=>void;sourceAction:(action:SourceAction)=>void;
   regenerate: (imagesOnly:boolean) => void;
   save: (content:ManualContent,publish:boolean,edits?:ManualEdits) => void;
@@ -142,6 +148,7 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
     <div className="split"><div><div className="eyebrow">MANUAL STUDIO</div><h2>{stateLabel}{generating&&<PendingDots/>}</h2></div>
       <span className={'badge ' + (manual.status === 'published' ? 'resolved' : 'active')}>{manual.status === 'published' ? '確認済' : '未確認'}</span></div>
     {manual.status==='draft'&&!generating&&!['awaiting_answers','rejected','archived'].includes(manual.reviewState??'')&&manual.access?.level!=='RESTRICTED'&&sources.length>0&&(needsSource||state==='failed'?<ProtectedSourceReview key={manual.updatedAt} manual={manual} busy={busy} ai={ai} onAction={sourceAction}/>:<details className="pipeline-report"><summary>保護済み会話を確認・再生成</summary><ProtectedSourceReview key={manual.updatedAt} manual={manual} busy={busy} ai={ai} onAction={sourceAction}/></details>)}
+    {needsSource&&sources.length>0&&<details className="pipeline-report"><summary>元の会話と翻訳を見る</summary><p className="muted">翻訳は参考表示です。機密情報の確認・編集には上の保護済みコピーを使用してください。</p>{sources.map(question=><ReviewConversation key={question.id} question={question} viewerId={viewerId} language={language} requestTranslations={requestTranslations}/>)}</details>}
     {needsSource&&<button type="button" className="secondary" disabled={busy} onClick={()=>changeState('reject')}>履歴のみ保存する（生成しない）</button>}
     {!needsSource&&<ManualAccessEditor key={manual.id+manual.updatedAt} manual={manual} staff={staff} busy={busy||generating} onSave={saveAccess}/>}
     {!needsSource&&<><div className="generation-track" role="status" aria-live="polite">
@@ -188,15 +195,7 @@ export function ManualReview({manual, questions, busy, ai, regenerate, save,save
     <div className="manual-review-columns">
       <section className="review-conversation">
         <h3 className="review-column-heading"><span aria-hidden="true">◌</span>元の会話</h3>
-        <div className="review-conversation-body">{sources.length ? sources.map(question => <div className="flow" key={question.id}>
-          <article className="source-message employee"><span className="source-avatar" aria-hidden="true">人</span><div><strong>スタッフ</strong>
-            <p>{question.japaneseText || question.originalText}</p></div></article>
-          {question.messages.map(message=><article key={message.id} className={'source-message '+message.role}>
-            <span className="source-avatar" aria-hidden="true">{message.role==='manager' ? '管' : '人'}</span><div>
-              <strong>{message.role==='manager' ? '管理者' : 'スタッフ'}</strong><p>{message.role==='manager' ? message.originalText : message.translatedText || message.originalText}</p>
-            </div>
-          </article>)}
-        </div>) : <p className="muted">参照した会話がありません。</p>}
+        <div className="review-conversation-body">{sources.length ? sources.map(question => <ReviewConversation key={question.id} question={question} viewerId={viewerId} language={language} requestTranslations={requestTranslations}/>) : <p className="muted">参照した会話がありません。</p>}
           {Boolean(manual.clarification?.answers.length)&&<div className="supplement-sources"><h4>管理者の追加情報（元のチャットとは別に保存）</h4>
             {manual.clarification!.answers.map(answer=><article className="source-message manager" key={answer.id}><div>
               <strong>{answer.question}</strong><p>{answer.answer}</p><small>{new Date(answer.createdAt).toLocaleString('ja-JP')}</small></div></article>)}

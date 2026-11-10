@@ -45,7 +45,7 @@ export function ChatMessages({question,viewerId,language,requestTranslations}:{
    setTranslations(current=>{const next={...current};delete next[id];return next;});
    queue.current=queue.current.then(()=>load([id]));
   }}>{labels.retry}</button>;
-  return result?<small className="chat-translation" aria-label={labels.label} lang={language}>{result}</small>:null;
+  return result?<small className="chat-translation" aria-label={labels.label} lang={language}><strong>{labels.label}：</strong>{result}</small>:null;
  }
 
  return <div className="messages" aria-label={copy(language,'cases')}>

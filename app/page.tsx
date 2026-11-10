@@ -172,6 +172,7 @@ export default function BridgeWork() {
   const unread=manager?0:deliveries.filter(row=>!row.readAt).length;
   const send=useCallback(<T,>(payload:object)=>request<T>(token,{siteId:site,...payload}),[request,token,site]);
   const requestChatTranslations=useCallback((messageIds:string[])=>send<{translations:{id:string;text:string|null|false}[]}>({action:'chatTranslations',id:selected,messageIds,language}),[send,selected,language]);
+  const requestReviewTranslations=useCallback((id:string,messageIds:string[])=>send<{translations:{id:string;text:string|null|false}[]}>({action:'chatTranslations',id,messageIds,language}),[send,language]);
   const previewScope=JSON.stringify([data?.profile.id,site,language]);
   const [previews,setPreviews]=useState<{scope:string;texts:Map<string,string|null>}>();
   const previewTexts=previews?.scope===previewScope?previews.texts:undefined;
@@ -291,12 +292,12 @@ export default function BridgeWork() {
   </section></main>;
 
   function caseList(items: Question[]) {
-    const labels={ja:{loading:'タイトルを翻訳中',failed:'タイトルを翻訳できませんでした'},en:{loading:'Translating title',failed:'Title translation unavailable'},vi:{loading:'Đang dịch tiêu đề',failed:'Không dịch được tiêu đề'}}[language];
+    const labels={ja:{loading:'タイトルを翻訳中',failed:'タイトルを翻訳できませんでした',translated:'翻訳'},en:{loading:'Translating title',failed:'Title translation unavailable',translated:'Translated'},vi:{loading:'Đang dịch tiêu đề',failed:'Không dịch được tiêu đề',translated:'Bản dịch'}}[language];
     return items.length ? <div className="rows">{items.map(row=>{
       const title=row.originalLanguage===language?row.originalText:previewTexts?.get(row.id)||(language==='ja'&&row.japaneseText!==row.originalText?row.japaneseText:'');
       const failed=!title&&previewTexts?.has(row.id);
       return <button className={'row ' + (selected === row.id ? 'selected' : '')} key={row.id} onClick={() => openCase(row.id)}>
-      <span className="tile" aria-hidden="true">◫</span><span className="row-text"><strong>{title||(failed?labels.failed:<>{labels.loading}<PendingDots/></>)}</strong>{failed&&<small lang={row.originalLanguage}>{row.originalText}</small>}<small>{siteName(row.siteId)} · {new Date(row.createdAt).toLocaleDateString(language)}</small></span>
+      <span className="tile" aria-hidden="true">◫</span><span className="row-text"><strong>{title||(failed?labels.failed:<>{labels.loading}<PendingDots/></>)}</strong>{Boolean(title)&&row.originalLanguage!==language&&title!==row.originalText&&<small className="title-translation-label">{labels.translated}</small>}{failed&&<small lang={row.originalLanguage}>{row.originalText}</small>}<small>{siteName(row.siteId)} · {new Date(row.createdAt).toLocaleDateString(language)}</small></span>
       <span className="case-badges">
         {row.route==='urgent'&&<span className="badge urgent-badge">{{ja:'緊急',en:'Urgent',vi:'Khẩn cấp'}[language]}</span>}
         {manager&&row.status==='resolved'&&pendingHistory.has(row.id)&&<span className="badge active">履歴承認待ち</span>}
@@ -455,7 +456,7 @@ export default function BridgeWork() {
             {reviewManual&&<div className="screen-title manual-detail-navigation"><button type="button" className="secondary" disabled={busy} onClick={()=>{setManualId('');setError('');}}>‹ 一覧に戻る</button><span className="eyebrow">ステップ 2 / 2</span></div>}
             {reviewManual?.status==='published' && <ManualSend key={reviewManual.id+reviewManual.updatedAt} manual={reviewManual} staff={data.staff} deliveries={deliveries} busy={busy}
               onSend={async employeeIds=>{await send({action:'sendManual',id:reviewManual.id,version:reviewManual.updatedAt,employeeIds});await refresh(token);}}/>}
-            {reviewManual && <ManualReview key={reviewManual.id} manual={reviewManual} questions={questions} busy={busy} ai={data.ai}
+            {reviewManual && <ManualReview key={reviewManual.id} manual={reviewManual} questions={questions} busy={busy} ai={data.ai} language={language} viewerId={data.profile.id} requestTranslations={requestReviewTranslations}
               privacyOverride={error==='privacy-review'?()=>run(async()=>{
                 const publish={id:reviewManual.id,version:reviewManual.updatedAt,publish:true,overridePrivacy:true};
                 await send(reviewManual.program?{...publish,action:'saveProgram',program:reviewManual.program,confirmPermissions:true}:{...publish,action:'saveManual',content:reviewManual.content});
