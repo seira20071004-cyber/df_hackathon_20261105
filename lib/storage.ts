@@ -54,7 +54,10 @@ const demoFile = join(folder, 'data.json');
 let pending = Promise.resolve();
 async function readDemo(): Promise<DemoState> {
   try {
-    return {sourceDocuments:[],manualViews: [], manualDeliveries:[],manualUses:[], ...JSON.parse(await readFile(demoFile, 'utf8'))};
+    const saved:DemoState={sourceDocuments:[],manualViews:[],manualDeliveries:[],manualUses:[],...JSON.parse(await readFile(demoFile,'utf8'))};
+    const ids=new Set(saved.manuals.map(manual=>manual.id));
+    saved.manuals.push(...seedDemo().manuals.filter(manual=>manual.id.startsWith('demo-knowledge-')&&!ids.has(manual.id)));
+    return saved;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     return {...seedDemo(),sourceDocuments:[], manualViews: [],manualDeliveries:[],manualUses:[]};

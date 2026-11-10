@@ -64,7 +64,7 @@ test('SDK pipeline, supplements, approval, sessions and escalation remain scoped
  await api('linh',{action:'resolve',id:faqId});
  const faqDraft=(await api('sato')).manuals.find(row=>row.sourceQuestionIds.includes(faqId));
  assert.equal(faqDraft.kind,'faq');
- assert.deepEqual((await api('alex',{action:'search',route:'rules',text:faqTitle,language:'ja'})).matches,[]);
+ assert.ok(!(await api('alex',{action:'search',route:'rules',text:faqTitle,language:'ja'})).matches.some(row=>row.id===faqDraft.id));
  await approve(faqDraft.id);
  const faq=await completed(faqDraft.id);
  assert.equal(faq.generation.state,'ready');

@@ -30,7 +30,9 @@ function AccountFields({profile,language}:{profile:Profile;language:Language}) {
     <div><dt>{text.company}</dt><dd>{profile.companyName || text.unset}</dd></div>
     <div><dt>{text.role}</dt><dd>{copy(language,profile.role)}</dd></div></dl>;
 }
-export function WorkspaceShell({profile,language,tab,unread,demo,onNavigate,onSignOut,busy,children,organizationLanguages}:{
+export function WorkspaceShell({profile,language,tab,unread,demo,onNavigate,onSignOut,busy,children,organizationLanguages,focusedScreen,chatScreen}:{
+  focusedScreen?:boolean;
+  chatScreen?:boolean;
   profile:Profile;language:Language;tab:AppTab;unread:number;demo:boolean;onNavigate:(tab:AppTab)=>void;onSignOut:()=>void;busy:boolean;children:ReactNode;organizationLanguages?:Language[];
 }) {
   const [account,setAccount]=useState(false);
@@ -53,7 +55,7 @@ export function WorkspaceShell({profile,language,tab,unread,demo,onNavigate,onSi
     document.addEventListener('keydown',keyboard);
     return ()=>{document.removeEventListener('pointerdown',dismiss);document.removeEventListener('keydown',keyboard);};
   },[account]);
-  return <div className={'workspace-layout'+(profile.role==='manager'?' manager-layout':' employee-layout')}>
+  return <div className={'workspace-layout'+(profile.role==='manager'?' manager-layout':' employee-layout')+(focusedScreen?' focused-screen':'')+(chatScreen?' fullscreen-chat':'')}>
     <header className="workspace-topbar"><div className="workspace-heading">
       <Brand compact/>
     </div><div className="workspace-topright">{demo&&<span className="badge demo shell-demo">{t('demo')}</span>}
@@ -67,11 +69,11 @@ export function WorkspaceShell({profile,language,tab,unread,demo,onNavigate,onSi
     <main className={'content flow workspace-content '+(profile.role==='employee'?'staff-workspace':'manager-workspace')}>
       <OrganizationLanguages.Provider value={organizationLanguages??['ja','en']}>{children}</OrganizationLanguages.Provider>
     </main>
-    <nav className="staff-bottom" aria-label={text.navigation}>
+    {!focusedScreen&&<nav className="staff-bottom" aria-label={text.navigation}>
       {tabs.map(item=><button key={item} type="button" aria-current={tab===item?'page':undefined} onClick={()=>navigate(item)}>
         <Icon name={item}/>{name(item)}{item==='manuals'&&unread>0&&<span className="notification-count">{unread}</span>}
       </button>)}
-    </nav>
+    </nav>}
   </div>;
 }
 export function Settings({profile,language,site,busy,onLanguage,onSite}:{profile:Profile;language:Language;site:string;busy:boolean;onLanguage:(language:Language)=>void;onSite:(site:string)=>void}) {

@@ -2,7 +2,6 @@ import type {Language} from '../lib/model';
 import type {ReactNode} from 'react';
 
 export type ConsultationStage='urgency'|'category'|'urgent'|'people'|'rules'|'work';
-const hr={email:'hr@example.com',phone:'03-0000-0000'};
 const labels={
   ja:{urgency:'緊急度を選択',category:'カテゴリを選択',urgent:'緊急',normal:'通常',urgentHelp:'けが・事故など、すぐに対応が必要な場合',normalHelp:'今すぐの対応が必要ない場合',people:'人間関係',rules:'ルール・制度',work:'業務',peopleHelp:'人間関係・ハラスメント・相談窓口',rulesHelp:'休暇・勤務・給与などの社内ルール',workHelp:'機械の使い方・作業手順・トラブル',safety:'まず安全を確保してください',contact:'現場の緊急連絡先',missing:'緊急連絡先は未設定です。',publicCall:'日本の消防・救急 119',support:'相談窓口',hr:'社内相談窓口（人事部）',demo:'デモ用・実際には連絡できません',external:'外部の相談窓口',stress:'仕事のストレスや心の悩み',harassment:'職場のハラスメントに関する情報と相談先'},
   en:{urgency:'Choose urgency',category:'Choose a category',urgent:'Urgent',normal:'Routine',urgentHelp:'Immediate help for an injury or accident',normalHelp:'Help that can wait',people:'Workplace relationships',rules:'Rules and policies',work:'Work tasks',peopleHelp:'Relationships, harassment and support contacts',rulesHelp:'Leave, working hours and pay',workHelp:'Equipment, procedures and troubleshooting',safety:'Get to safety first',contact:'Workplace emergency contact',missing:'No workplace emergency contact is configured.',publicCall:'Fire and ambulance in Japan: 119',support:'Support contacts',hr:'Internal support (Human Resources)',demo:'Demo only. These contacts are inactive.',external:'External support',stress:'Work stress and mental health',harassment:'Workplace harassment information and support'},
@@ -28,7 +27,7 @@ export function ConsultationRouting({stage,language,contact,onSelect}:{stage:Con
       <a className="emergency-call" href="tel:119">{t.publicCall}</a>
     </section>;
   }
-  if(stage==='people')return <section className="panel flow"><h2>{t.support}</h2><div className="notice"><h3>{t.hr}</h3><p>{hr.email}</p><p>{hr.phone}</p><small>{t.demo}</small></div>
+  if(stage==='people')return <section className="panel flow"><h2>{t.support}</h2><div className="notice"><h3>{t.hr}</h3><p>{{ja:'社内の相談先は設定されていません。',en:'No internal contact is configured.',vi:'Chưa có thông tin liên hệ nội bộ.'}[language]}</p></div>
     <h3>{t.external}</h3>
     <a href="https://kokoro.mhlw.go.jp/" target="_blank" rel="noreferrer">こころの耳 · {t.stress} ↗</a>
     <a href="https://www.no-harassment.mhlw.go.jp/" target="_blank" rel="noreferrer">あかるい職場応援団 · {t.harassment} ↗</a>

@@ -92,7 +92,7 @@ export async function workspace(profile: Profile) {
     const legacyReferences = site.questions.filter(question => question.employeeId === profile.id)
       .flatMap(question => question.references).filter(reference => reference.kind === 'manual' && !reference.version);
     return {...site,uses,deliveries:received, manuals: site.manuals.filter(manual => mayReadManual(profile, manual) &&
-      (viewed.some(view => view.manualId === manual.id && view.version === manual.updatedAt) ||
+      ((isDemo()&&manual.id.startsWith('demo-knowledge-'))||viewed.some(view => view.manualId === manual.id && view.version === manual.updatedAt) ||
         received.some(delivery=>delivery.manualId===manual.id) ||
         legacyReferences.some(reference => reference.id === manual.id))).map(staffManual)};
   }));

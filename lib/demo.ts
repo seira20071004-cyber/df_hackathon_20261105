@@ -35,6 +35,21 @@ export function seedDemo() {
     }
   }];
   const interactive=interactiveDemo();questions.push(interactive.question);manuals.push(interactive.manual);
+  const sampleTopics = [
+    ['manual','入口マットの点検',['マットの端がめくれていないか確認する','位置がずれていれば指定の位置に戻す']],
+    ['manual','備品を補充する手順',['棚の表示を確認する','不足した備品を補充して残数を記録する']],
+    ['manual','清掃後の写真を提出する手順',['清掃した範囲を確認する','個人や書類が写らないよう撮影して提出する']],
+    ['manual','開店前の準備',['当日の担当表を確認する','担当する売場の備品と掲示を確認する']],
+    ['faq','シフトの変更はどこで相談しますか？',['デモ現場では、希望する日程を管理者へ伝えてください。']],
+    ['faq','勤怠の打刻を忘れた場合は？',['打刻を忘れた日と実際の時刻を管理者に伝えてください。']],
+    ['faq','備品の在庫が足りないときは？',['備品名と残数を添えて、現場の管理者へ連絡してください。']],
+    ['faq','休憩場所はどこですか？',['デモ現場では、1階のスタッフ休憩室を利用できます。']],
+  ] as const;
+  for(const [index,[kind,title,steps]] of sampleTopics.entries()){
+    const content={title:'【デモ】'+title,task:title,purpose:'架空の職場での確認用サンプル',tools:[],steps:[...steps],cautions:[],mistakes:[],checks:[]};
+    manuals.push({...scope,id:'demo-knowledge-'+index,...(kind==='faq'?{kind}:{}),sourceQuestionIds:[],status:'published',approvedBy:'sato',
+      languages:['ja'],imageUrls:[],createdAt:date,updatedAt:date,content,translations:{}});
+  }
   return {questions, manuals};
 }
 // Fictional, explicitly authored example. This is not a live Gemini result.

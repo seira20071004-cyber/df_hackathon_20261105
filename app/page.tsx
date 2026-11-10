@@ -163,6 +163,9 @@ export default function BridgeWork() {
   const manuals = data?.manuals.filter(row => row.siteId === site) ?? [];
   const pendingHistory=new Set(manuals.filter(row=>row.generation?.error==='source-review-required').flatMap(row=>row.sourceQuestionIds));
   const question = questions.find(row => row.id === selected);
+  const focusedScreen=tab==='cases'&&Boolean(question)||!manager&&(tab==='home'&&consultOpen||tab==='manuals'&&Boolean(manualId));
+  const screenKey=JSON.stringify([tab,consultOpen,consultationStage,selected,manualId,Boolean(results)]);
+  useEffect(()=>{window.scrollTo(0,0);},[screenKey]);
   const visibleQuestions=manager?questions.filter(row=>row.status===statusFilter):questions;
   const manual = manuals.find(row => row.id === manualId);
   const chatPeer=question&&(manager?data?.staff.find(person=>person.id===question.employeeId)?.name:question.assigneeName);
@@ -227,6 +230,7 @@ export default function BridgeWork() {
   }
   const manualEvent=(target:Manual):ManualEvent=>async(event,runId,path,text,eventLanguage)=>{
     const result=await send<{question?:Question}>({action:'manualSession',id:target.id,version:target.updatedAt,event,runId,path,text,language:eventLanguage??language});
+    if(event==='resolved')changeTab('home');
     await refresh(token);if(result.question)openCase(result.question.id);return result;
   };
   function selectConsultationStage(stage:ConsultationStage){
@@ -249,7 +253,7 @@ export default function BridgeWork() {
       const created = await send<Question>({action:match ? 'selfResolve' : 'ask', id:crypto.randomUUID(), text:query, language,
         ...(match ? {matchId:match.id,kind:match.kind} : {route:consultationStage,...(consultationStage==='work'&&photo?{photo:photo.data}:{})})});
       await refresh(token);
-      setQuery(''); setResults(undefined);setConsultOpen(false);openCase(created.id);
+      setQuery('');if(match)changeTab('home');else{setResults(undefined);setConsultOpen(false);openCase(created.id);}
     });
   }
   function notifyEmergency(){
@@ -317,7 +321,7 @@ export default function BridgeWork() {
     </button>;})}</div> : <p className="empty">{t('empty')}</p>;
   }
 
-  return <WorkspaceShell organizationLanguages={data.organizationLanguages} profile={data.profile} language={language} tab={tab} unread={unread} demo={data.demo} busy={busy||listening} onNavigate={next=>{if(next==='manuals')setManualId('');changeTab(next);}} onSignOut={signOut}>
+  return <WorkspaceShell focusedScreen={focusedScreen} chatScreen={tab==='cases'&&Boolean(question)} organizationLanguages={data.organizationLanguages} profile={data.profile} language={language} tab={tab} unread={unread} demo={data.demo} busy={busy||listening} onNavigate={next=>{if(next==='manuals')setManualId('');changeTab(next);}} onSignOut={signOut}>
         {data.aiFixtures&&<p className="notice" role="status">{{ja:'架空のデモ · AIは模擬応答です',en:'Fictional demo · Simulated AI responses',vi:'Dữ liệu mẫu · Phản hồi AI mô phỏng'}[language]}</p>}
         {tab==='settings'&&<Settings profile={data.profile} language={language} site={site} busy={busy||listening} onLanguage={changeLanguage} onSite={changeSite}/>}
         {tab==='settings'&&!data.demo&&<form className="panel flow" onSubmit={event=>{event.preventDefault();const name=String(new FormData(event.currentTarget).get('displayName')??'');run(async()=>{await request(token,{action:'profileName',name});await refresh(token);});}}><label>{{ja:'表示名',en:'Display name',vi:'Tên hiển thị'}[language]}<input key={data.profile.name} name="displayName" defaultValue={data.profile.name} required maxLength={100}/></label><button disabled={busy}>{{ja:'表示名を保存',en:'Save display name',vi:'Lưu tên hiển thị'}[language]}</button></form>}
@@ -331,7 +335,7 @@ export default function BridgeWork() {
             else if(consultationStage==='urgency')setConsultOpen(false);
             else setConsultationStage(consultationStage==='urgent'||consultationStage==='category'?'urgency':'category');
           }}>‹</button><h2>{({ja:'困りごとを相談',en:'Get help at work',vi:'Hỏi về công việc'})[language]}</h2></div>}
-          {consultOpen&&<ConsultationRouting stage={consultationStage} language={language} contact={emergencyContact} onSelect={selectConsultationStage}/>}
+          {consultOpen&&!results&&!searching&&<ConsultationRouting stage={consultationStage} language={language} contact={emergencyContact} onSelect={selectConsultationStage}/>}
           {consultOpen&&consultationStage==='urgent'&&<button type="button" className="secondary" disabled={busy} onClick={notifyEmergency}>{{ja:'管理者へ緊急の連絡を送る',en:'Send an urgent alert to managers',vi:'Gửi thông báo khẩn cho quản lý'}[language]}</button>}
           {consultOpen&&(consultationStage==='rules'||consultationStage==='work')&&<>
           {consultationStage==='work'&&photoEnabled&&!manual&&<details className="panel photo-intake"><summary>{{ja:'写真を追加（任意）',en:'Add a photo (optional)',vi:'Thêm ảnh (không bắt buộc)'}[language]}</summary><p>{{ja:'個人情報が写っていない写真を選んでください。検索時に画像をAIで解析します。',en:'Choose a photo without personal information. AI analyzes it during the search.',vi:'Chọn ảnh không có thông tin cá nhân. AI sẽ phân tích ảnh khi tìm kiếm.'}[language]}</p><input type="file" aria-label="相談の写真" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={event=>{const file=event.target.files?.[0];if(!file){setPhoto(undefined);return;}run(async()=>{setPhoto(undefined);if(file.size>800_000)throw new Error('photo-too-large');const data=new Uint8Array(await file.arrayBuffer());let raw='';for(let i=0;i<data.length;i+=8192)raw+=String.fromCharCode(...data.subarray(i,i+8192));setPhoto({name:file.name,data:btoa(raw)});});}}/>{photo&&<div className="actions"><small>{photo.name}</small>{results&&<button type="button" className="secondary" disabled={busy} onClick={()=>searchConsultation()}>写真を含めて探す</button>}<button type="button" className="link" disabled={busy} onClick={()=>setPhoto(undefined)}>写真を外す</button></div>}{results?.photoAnalyzed===false&&<p className="notice">写真を解析できなかったため、文章で確認しました。</p>}</details>}
@@ -371,7 +375,7 @@ export default function BridgeWork() {
               {voiceSupported && <button className="secondary" type="button" disabled={busy || listening} onClick={()=>dictate()}>{t(listening ? 'listening' : 'voice')}</button>}
               <button className="secondary" type="button" disabled={busy||listening||!query.trim()} onClick={() => ask()}>{t('send')} →</button></div>
           </form>}
-          {consultOpen&&(results||searching)&&<button className="secondary direct-contact" type="button" disabled={busy||!query.trim()} onClick={()=>ask()}>{t('send')} →</button>}
+          {consultOpen&&results&&!manual&&!searching&&<button className="secondary direct-contact" type="button" disabled={busy||!query.trim()} onClick={()=>ask()}>{t('send')} →</button>}
           </>}
         </>}
         {tab === 'cases' && <>
@@ -423,6 +427,7 @@ export default function BridgeWork() {
                 const resolved = await send<Question>({action:'resolve', id:question.id});
                 setData(current => current && {...current, questions: current.questions.map(row =>
                   row.id === resolved.id && row.siteId === resolved.siteId ? resolved : row)});
+                changeTab('home');
               })}>{t('resolve')}</button></div>}
             </> : <>{question.resolution && <p className="notice">{t('resolution')} · {question.resolution}</p>}
               {manager && <div className="flow">
@@ -493,8 +498,12 @@ export default function BridgeWork() {
               ‹ {{ja:'届いたマニュアルに戻る',en:'Back to received guides',vi:'Quay lại tài liệu đã nhận'}[language]}
             </button></div>
             <ManualView manual={manual} language={language} onEvent={manualEvent(manual)}/>{sourceLink(manual)}{reportGuide(manual)}
-          </div>:<ManualInbox deliveries={deliveries} manuals={manuals} language={language} busy={busy} onOpen={readManual}/>}
+          </div>:<><ManualInbox deliveries={deliveries} manuals={manuals} language={language} busy={busy} onOpen={readManual}/>
+            {data.demo&&<section className="panel flow"><h2>サンプルマニュアル・FAQ</h2>
+              {manuals.filter(row=>row.id.startsWith('demo-knowledge-')).map(row=><button type="button" className="secondary" key={row.id} disabled={busy} onClick={()=>readManual(row)}>{row.content.title}</button>)}
+            </section>}
+          </>}
         </>}
-        <footer>Bridge Work <span>·</span> {siteName(site)}</footer>
+        {!focusedScreen&&<footer>Bridge Work <span>·</span> {siteName(site)}</footer>}
   </WorkspaceShell>;
 }
