@@ -81,6 +81,7 @@ nav { display:grid; gap:5px; }
 .row { display:grid; grid-template-columns:40px minmax(0,1fr) auto auto; align-items:center; text-align:left; color:var(--ink); background:#fff; border-color:var(--line); gap:10px; padding:10px; width:100%; }
 .row.selected { border-color:#739cf3; background:#f5f8ff; }
 .row-text { overflow-wrap:anywhere; min-width:0; }
+.row .title-translation-label {display:inline-block;margin:3px 0;color:#2459a5;font-weight:700;font-size:.72rem;}
 .result { border:1px solid var(--line); border-radius:13px; padding:15px; }
 .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
 .stat { justify-content:space-between; color:var(--ink); text-align:left; }

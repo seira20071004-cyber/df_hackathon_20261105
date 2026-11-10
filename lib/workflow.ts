@@ -278,15 +278,15 @@ export async function execute(profile: Profile, input: Action) {
       return question;
     });
     try{
-      const previews=new Map(rows.map(row=>[row.id,row.originalLanguage===input.language?row.originalText:
-        input.language==='ja'&&row.japaneseText!==row.originalText?row.japaneseText:'']));
+      const previews=new Map(rows.map(row=>[row.id,row.originalLanguage===input.language?row.originalText:'']));
       const pending=rows.filter(row=>!previews.get(row.id));
       if(pending.length){
         const cloud=chatTranslationEnabled()
           ? await translateChatBatch(pending.map(row=>row.originalText),input.language).catch(()=>[])
           : [];
         await Promise.all(pending.map(async(row,index)=>{
-          const translated=cloud[index]||await translate(row.originalText,row.originalLanguage,input.language,isDemo()).catch(()=>'');
+          const saved=input.language==='ja'&&row.japaneseText!==row.originalText?row.japaneseText:'';
+          const translated=cloud[index]||saved||await translate(row.originalText,row.originalLanguage,input.language,isDemo()).catch(()=>'');
           previews.set(row.id,translated||'');
         }));
       }
