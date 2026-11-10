@@ -286,7 +286,7 @@ export default function BridgeWork() {
     : error === 'login-required' ? 'セッションの有効期限が切れました。ログアウトして再ログインしてください。' : t('error'));
 
   if (!data) return <main className="login-shell"><section className="login panel flow">
-    <Brand/><div className="eyebrow">MULTILINGUAL WORKPLACE SUPPORT</div><h1>Bridge Work 2.0</h1>
+    <Brand/><div className="eyebrow">MULTILINGUAL WORKPLACE SUPPORT</div><h1>Bridge Work</h1>
     <p>言葉の壁を越えて、仕事をもっとスムーズに。</p>
     {error && <p role="alert" className="alert">{errorText}</p>}
     {demo === undefined && !error && <p className="muted" role="status">読み込み中<PendingDots/></p>}

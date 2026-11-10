@@ -382,9 +382,24 @@ footer { color:var(--muted); font-size:.8rem; text-align:center; padding:8px; }
 .staff-bottom button[aria-current="page"]{background:#eaf1ff;color:#173fae}
 .staff-bottom .notification-count{position:absolute;top:2px;left:calc(50% + 10px)}
 .entry-actions button small{display:block;margin-left:.35em}
-.entry-steps{padding-inline-start:1.8em;text-align:start;line-height:2}
-.entry-steps li::marker{font-weight:700;color:var(--blue)}
+.organization-entry{padding:20px;border:1px solid #d7e2f2;border-radius:18px;background:#fff;text-align:left;gap:18px;box-shadow:0 8px 28px #233b6910}
+.entry-heading{display:flex;align-items:flex-start;gap:12px;min-width:0}
+.login .entry-back{width:40px;min-width:40px;min-height:40px;padding:0;justify-content:center;background:#edf2fb;color:#263e64;font-size:1.6rem;line-height:1}
+.entry-heading h2{font-size:1.15rem;line-height:1.4}
+.entry-heading p,.entry-form p,.entry-form small{color:#536780;font-size:.84rem;line-height:1.5}
+.entry-steps{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.entry-steps li{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e4eaf3;border-radius:11px;background:#f7f9fc;color:#536780}
+.entry-steps li.current{background:#edf3ff;border-color:#bed0f5;color:#183e9d}
+.entry-steps li.completed{background:#edf8f3;border-color:#c8e8d7;color:#216644}
+.entry-steps li>span{display:grid;place-items:center;flex:none;width:27px;height:27px;border-radius:50%;background:#e1e8f4;font-weight:800;font-size:.8rem}
+.entry-steps li.current>span{background:#1745df;color:white}
+.entry-steps li.completed>span{background:#25865d;color:white}
+.entry-steps li strong,.entry-steps li small{display:block;line-height:1.35}
+.entry-steps li small{font-size:.74rem;margin-top:3px}
 .organization-entry label{text-align:start}
+.organization-entry input{min-height:48px}
+.login .organization-entry .entry-form button,.login .organization-entry form button{width:100%;justify-content:center;text-align:center}
+.login .organization-entry .google-login{gap:10px}
 .google-login span{font-weight:800;color:#4285f4}
 .alternate-login{text-align:center;color:var(--muted)}
 .alternate-login>form{margin-top:12px;text-align:start}
