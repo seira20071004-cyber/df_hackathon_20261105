@@ -176,7 +176,7 @@ export default function BridgeWork() {
   const previewScope=JSON.stringify([data?.profile.id,site,language]);
   const [previews,setPreviews]=useState<{scope:string;texts:Map<string,string|null>}>();
   const previewTexts=previews?.scope===previewScope?previews.texts:undefined;
-  const previewIds=JSON.stringify(tab==='cases'?visibleQuestions.filter(row=>row.originalLanguage!==language&&!previewTexts?.has(row.id)).map(row=>row.id):[]);
+  const previewIds=JSON.stringify(tab==='cases'?visibleQuestions.filter(row=>!previewTexts?.has(row.id)).map(row=>row.id):[]);
   useEffect(()=>{
     const ids=JSON.parse(previewIds) as string[];
     if(!token||!ids.length)return;
@@ -293,10 +293,10 @@ export default function BridgeWork() {
   function caseList(items: Question[]) {
     const labels={ja:{loading:'タイトルを翻訳中',failed:'タイトルを翻訳できませんでした',translated:'翻訳'},en:{loading:'Translating title',failed:'Title translation unavailable',translated:'Translated'},vi:{loading:'Đang dịch tiêu đề',failed:'Không dịch được tiêu đề',translated:'Bản dịch'}}[language];
     return items.length ? <div className="rows">{items.map(row=>{
-      const title=row.originalLanguage===language?row.originalText:previewTexts?.get(row.id)||'';
+      const title=previewTexts?.get(row.id)||'';
       const failed=!title&&previewTexts?.has(row.id);
       return <button className={'row ' + (selected === row.id ? 'selected' : '')} key={row.id} onClick={() => openCase(row.id)}>
-      <span className="tile" aria-hidden="true">◫</span><span className="row-text"><strong>{title||(failed?labels.failed:<>{labels.loading}<PendingDots/></>)}</strong>{Boolean(title)&&row.originalLanguage!==language&&title!==row.originalText&&<small className="title-translation-label">{labels.translated}</small>}{failed&&<small lang={row.originalLanguage}>{row.originalText}</small>}<small>{siteName(row.siteId)} · {new Date(row.createdAt).toLocaleDateString(language)}</small></span>
+      <span className="tile" aria-hidden="true">◫</span><span className="row-text"><strong>{title||(failed?labels.failed:<>{labels.loading}<PendingDots/></>)}</strong>{Boolean(title)&&title!==row.originalText&&<small className="title-translation-label">{labels.translated}</small>}{failed&&<small lang={row.originalLanguage}>{row.originalText}</small>}<small>{siteName(row.siteId)} · {new Date(row.createdAt).toLocaleDateString(language)}</small></span>
       <span className="case-badges">
         {row.route==='urgent'&&<span className="badge urgent-badge">{{ja:'緊急',en:'Urgent',vi:'Khẩn cấp'}[language]}</span>}
         {manager&&row.status==='resolved'&&pendingHistory.has(row.id)&&<span className="badge active">履歴承認待ち</span>}

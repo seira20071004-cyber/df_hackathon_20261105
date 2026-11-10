@@ -4,6 +4,7 @@ import {deleteDocument,directManual,documentList,documentPermission,materializeD
 import { z } from 'zod';
 import { aiConfigured, embedding,generate, manualContent, relevance, summarize, translate } from './ai';
 import {chatTranslationEnabled,translateChatBatch} from './chat-translation';
+import {detectedPreviews} from './consultation-preview';
 import { buildManual, generationRunning } from './manuals';
 import { figureSchema, normalizeFigures, reorderedAssets } from './manual-assets';
 import {CONTACT_TEXT,blockText,graphIssues,graphShape,programContent,programSchema,validRunPath} from './manual-graph';
@@ -278,19 +279,18 @@ export async function execute(profile: Profile, input: Action) {
       return question;
     });
     try{
-      const previews=new Map(rows.map(row=>[row.id,row.originalLanguage===input.language?row.originalText:'']));
-      const pending=rows.filter(row=>!previews.get(row.id));
-      if(pending.length){
-        const cloud=chatTranslationEnabled()
-          ? await translateChatBatch(pending.map(row=>row.originalText),input.language).catch(()=>[])
-          : [];
-        await Promise.all(pending.map(async(row,index)=>{
-          const saved=input.language==='ja'&&row.japaneseText!==row.originalText?row.japaneseText:'';
-          const translated=cloud[index]||saved||await translate(row.originalText,row.originalLanguage,input.language,isDemo()).catch(()=>'');
-          previews.set(row.id,translated||'');
-        }));
+      if(chatTranslationEnabled()){
+        // The language selected when a consultation was created may differ from
+        // the actual text. Cloud Translation detects the source from the text.
+        return {translations:await detectedPreviews(rows,input.language,translateChatBatch)};
       }
-      return {translations:rows.map(row=>({id:row.id,text:previews.get(row.id)||null}))};
+      const translations=await Promise.all(rows.map(async row=>{
+        if(row.originalLanguage===input.language)return {id:row.id,text:row.originalText};
+        const saved=input.language==='ja'&&row.japaneseText!==row.originalText?row.japaneseText:'';
+        const translated=saved||await translate(row.originalText,row.originalLanguage,input.language,isDemo()).catch(()=>'');
+        return {id:row.id,text:translated||null};
+      }));
+      return {translations};
     }catch{throw new ApiError(503,'translation-unavailable');}
   }
   if(input.action==='chatTranslations'){
